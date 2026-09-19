@@ -11,6 +11,7 @@ import { createAdminGovernanceV1Router } from './api/admin-governance-v1';
 import { createAuthV1Router } from './api/auth-v1';
 import { createWebAuthV1Router } from './api/web-auth-v1';
 import { createAccountV1Router } from './api/account-v1';
+import { createAccountSessionSharesV1Router } from './api/account-session-shares-v1';
 import { createPersonalSnapshotV1Router } from './api/personal-snapshot-v1';
 import { createPersonalDictionarySnapshotV1Router } from './api/personal-dictionary-snapshot-v1';
 import { createExcelExportSettingsV1Router } from './api/excel-export-settings-v1';
@@ -115,6 +116,10 @@ export function createApp(options: CreateAppOptions = {}): Express {
   app.use('/api/v1/auth', createAuthV1Router({ db, config: runtimeConfig }));
   app.use('/api/v1/web-auth', createWebAuthV1Router({ db, config: runtimeConfig }));
   app.use('/api/v1/account', createAccountV1Router({ db, config: runtimeConfig }));
+  app.use(
+    '/api/v1/account',
+    createAccountSessionSharesV1Router({ db, config: runtimeConfig }),
+  );
   app.use(
     '/api/v1/account',
     createPersonalSnapshotV1Router({ db, config: runtimeConfig }),

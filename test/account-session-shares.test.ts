@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import test from 'node:test';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { after, before, describe, test } from 'node:test';
+import jwt from 'jsonwebtoken';
+import { createApp } from '../src/app';
 import { AppError } from '../src/errors/app-error';
 import { openDatabase } from '../src/db/database';
 import {
@@ -224,4 +228,194 @@ test('accept then revoke removes only share-origin memberships', () => {
   `).get('session-owned', 'user-carol') as { removed_at: string | null };
   assert.ok(shareOrigin.removed_at);
   assert.equal(invited.removed_at, null);
+});
+
+const JWT_SECRET = 'account-share-test-jwt-secret-32-bytes-minimum';
+const JWT_ISSUER = 'account-share-test';
+const BOB_ID = 'user-bob-http';
+const ALICE_ID = 'user-alice-http';
+const NOW = '2026-09-13T12:00:00.000Z';
+
+function accessToken(userId: string): string {
+  return jwt.sign(
+    { type: 'access', role: 'user', jti: randomUUID(), av: 1 },
+    JWT_SECRET,
+    {
+      algorithm: 'HS256',
+      issuer: JWT_ISSUER,
+      audience: 'openlogtool-v1',
+      subject: userId,
+      expiresIn: 300,
+    },
+  );
+}
+
+describe('account session share HTTP API', () => {
+  let db: ReturnType<typeof openDatabase>;
+  let server: Server;
+  let baseUrl: string;
+  let bobToken: string;
+  let aliceToken: string;
+
+  before(async () => {
+    db = openDatabase(':memory:');
+    const insertUser = db.prepare(`
+      INSERT INTO users (id, username, password_hash, role, created_at, updated_at)
+      VALUES (?, ?, 'unused', 'user', ?, ?)
+    `);
+    insertUser.run(BOB_ID, 'bob', NOW, NOW);
+    insertUser.run(ALICE_ID, 'alice', NOW, NOW);
+    bobToken = accessToken(BOB_ID);
+    aliceToken = accessToken(ALICE_ID);
+    server = createServer(createApp({
+      db,
+      config: {
+        jwtSecret: JWT_SECRET,
+        jwtIssuer: JWT_ISSUER,
+        rateLimitEnabled: false,
+        environment: 'test',
+      },
+    }));
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address() as AddressInfo;
+    baseUrl = `http://127.0.0.1:${address.port}`;
+  });
+
+  after(async () => {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => error ? reject(error) : resolve()));
+    db.close();
+  });
+
+  async function request(
+    path: string,
+    options: {
+      method?: string;
+      token?: string;
+      body?: unknown;
+      headers?: Record<string, string>;
+    } = {},
+  ) {
+    const response = await fetch(`${baseUrl}${path}`, {
+      method: options.method ?? 'GET',
+      headers: {
+        ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
+        ...(options.body === undefined ? {} : { 'content-type': 'application/json' }),
+        ...options.headers,
+      },
+      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+    });
+    const text = await response.text();
+    return { status: response.status, body: text ? JSON.parse(text) : null };
+  }
+
+  test('create then accept makes an active grant without reverse grant', async () => {
+    const created = await request('/api/v1/account/session-shares', {
+      method: 'POST',
+      token: bobToken,
+      headers: { 'idempotency-key': 'share-http-1' },
+      body: {
+        granteeUsername: 'alice',
+        includePersonal: true,
+        includeOwned: true,
+        includeEditor: true,
+        canJoinAs: 'editor',
+      },
+    });
+    assert.equal(created.status, 201);
+    const accepted = await request(
+      `/api/v1/account/session-shares/${created.body.share.id}/accept`,
+      {
+        method: 'POST',
+        token: aliceToken,
+        headers: { 'idempotency-key': 'accept-http-1' },
+        body: {},
+      },
+    );
+    assert.equal(accepted.status, 200);
+    assert.equal(accepted.body.share.status, 'accepted');
+    const aliceOutbox = await request('/api/v1/account/session-shares?box=outbox', {
+      token: aliceToken,
+    });
+    assert.equal(aliceOutbox.body.items.length, 0);
+  });
+
+  test('unknown username, self share and non-grantee accept are rejected', async () => {
+    const missing = await request('/api/v1/account/session-shares', {
+      method: 'POST',
+      token: bobToken,
+      headers: { 'idempotency-key': 'missing-http-1' },
+      body: {
+        granteeUsername: 'nobody',
+        includePersonal: true,
+        includeOwned: true,
+        includeEditor: true,
+        canJoinAs: 'editor',
+      },
+    });
+    assert.equal(missing.status, 404);
+    assert.equal(missing.body.error.code, 'ACCOUNT_SHARE_USER_NOT_FOUND');
+
+    const self = await request('/api/v1/account/session-shares', {
+      method: 'POST',
+      token: bobToken,
+      headers: { 'idempotency-key': 'self-http-1' },
+      body: {
+        granteeUsername: 'bob',
+        includePersonal: true,
+        includeOwned: true,
+        includeEditor: true,
+        canJoinAs: 'editor',
+      },
+    });
+    assert.equal(self.status, 400);
+    assert.equal(self.body.error.code, 'ACCOUNT_SHARE_SELF');
+
+    const created = await request('/api/v1/account/session-shares', {
+      method: 'POST',
+      token: aliceToken,
+      headers: { 'idempotency-key': 'alice-to-bob-1' },
+      body: {
+        granteeUsername: 'bob',
+        includePersonal: true,
+        includeOwned: true,
+        includeEditor: true,
+        canJoinAs: 'editor',
+      },
+    });
+    const stolen = await request(
+      `/api/v1/account/session-shares/${created.body.share.id}/accept`,
+      {
+        method: 'POST',
+        token: aliceToken,
+        headers: { 'idempotency-key': 'stolen-accept-1' },
+        body: {},
+      },
+    );
+    assert.equal(stolen.status, 403);
+    assert.equal(stolen.body.error.code, 'ACCOUNT_SHARE_NOT_GRANTEE');
+  });
+
+  test('block rejects inbound requests', async () => {
+    const blocked = await request('/api/v1/account/session-share-blocks/bob', {
+      method: 'PUT',
+      token: aliceToken,
+      headers: { 'idempotency-key': 'block-bob-1' },
+    });
+    assert.equal(blocked.status, 200);
+    const created = await request('/api/v1/account/session-shares', {
+      method: 'POST',
+      token: bobToken,
+      headers: { 'idempotency-key': 'blocked-create-1' },
+      body: {
+        granteeUsername: 'alice',
+        includePersonal: true,
+        includeOwned: true,
+        includeEditor: true,
+        canJoinAs: 'editor',
+      },
+    });
+    assert.equal(created.status, 403);
+    assert.equal(created.body.error.code, 'ACCOUNT_SHARE_BLOCKED');
+  });
 });
