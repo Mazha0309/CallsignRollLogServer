@@ -55,7 +55,44 @@ export interface SessionSummary {
   logCount?: number;
 }
 
-export type AccountSessionSource = 'collaboration' | 'personal';
+export type AccountSessionSource = 'collaboration' | 'personal' | 'shared';
+export type ShareJoinRole = 'editor' | 'viewer' | 'none';
+export type ShareGrantStatus = 'pending' | 'accepted' | 'rejected' | 'cancelled' | 'revoked' | 'expired';
+
+export interface AccountShareGrant {
+  id: string;
+  grantorUserId: string;
+  granteeUserId: string;
+  status: ShareGrantStatus;
+  includePersonal: boolean;
+  includeOwned: boolean;
+  includeEditor: boolean;
+  canJoinAs: ShareJoinRole;
+  createdAt: string;
+  updatedAt: string;
+  respondedAt: string | null;
+  revokedAt: string | null;
+  expiresAt: string | null;
+}
+
+export interface SharedSessionSummary {
+  source: 'personal' | 'collaboration';
+  sessionId: string;
+  title: string;
+  status: string;
+  visibility: 'shared';
+  grantId: string;
+  grantorUserId: string;
+  grantorUsername: string;
+  grantorRole: SessionRole | null;
+  canJoin: boolean;
+  joinRole: Exclude<ShareJoinRole, 'none'> | null;
+  logCount: number;
+  createdAt: string;
+  updatedAt: string;
+  closedAt: string | null;
+  deletedAt: string | null;
+}
 
 export interface AccountSessionSummary {
   source: AccountSessionSource;
@@ -71,6 +108,7 @@ export interface AccountSessionSummary {
   closedAt: string | null;
   deletedAt: string | null;
   snapshotRevision: number | null;
+  sharedSource?: 'personal' | 'collaboration';
 }
 
 export interface PersonalSessionDetails {

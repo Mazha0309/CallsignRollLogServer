@@ -32,7 +32,7 @@ import {
 } from 'antd';
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ApiError, sessionsApi, type LogPatch, type MutationResult } from '../../api';
+import { ApiError, accountApi, sessionsApi, type LogPatch, type MutationResult } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { AsyncContent } from '../../components/AsyncContent';
 import { PageHeader } from '../../components/PageHeader';
@@ -323,6 +323,8 @@ function SettingsTab({ session, reload }: { session: SessionSummary; reload: () 
   const { t } = useI18n();
   const [messageApi, contextHolder] = message.useMessage();
   const owner = session.role === 'owner';
+  const passphrase = useAsync(() => owner ? accountApi.joinPassphrase(session.sessionId) : Promise.resolve({ configured: false, updatedAt: null }), [session.sessionId, owner]);
+  const [passphraseValue, setPassphraseValue] = useState('');
   const close = async () => {
     const result = await sessionsApi.close(session.sessionId, session.version);
     if (result.status !== 'accepted') {
@@ -345,6 +347,23 @@ function SettingsTab({ session, reload }: { session: SessionSummary; reload: () 
     <Form.Item label={t('settings.sessionTitle')} name="title" rules={[{ required: true }, { max: 200 }]}><Input disabled={!owner || session.status !== 'active'} /></Form.Item>
     {owner && session.status === 'active' && <Button type="primary" htmlType="submit" icon={<SaveOutlined />}>{t('common.save')}</Button>}
   </Form>
+  {owner && <Card size="small" title={t('sharing.passphrase')} style={{ marginTop: 20 }}>
+    <Typography.Paragraph type="secondary">{t('sharing.passphraseHint')}</Typography.Paragraph>
+    <Space wrap>
+      <Tag>{passphrase.data?.configured ? t('sharing.passphraseConfigured') : t('sharing.passphraseMissing')}</Tag>
+      <Input.Password value={passphraseValue} onChange={(event) => setPassphraseValue(event.target.value)} style={{ width: 220 }} />
+      <Button onClick={async () => {
+        try {
+          await accountApi.setJoinPassphrase(session.sessionId, passphraseValue);
+          setPassphraseValue('');
+          passphrase.reload();
+          messageApi.success(t('settings.applied'));
+        } catch (reason) {
+          messageApi.error(reason instanceof Error ? reason.message : t('error.default'));
+        }
+      }}>{t('sharing.setPassphrase')}</Button>
+    </Space>
+  </Card>}
   {owner && session.status === 'active' && <Card size="small" title={t('sessions.closeTitle')} style={{ marginTop: 20 }}>
     <Typography.Paragraph type="secondary">{t('sessions.closeHint')}</Typography.Paragraph>
     <Popconfirm title={t('sessions.closeConfirm')} onConfirm={() => void close()} okButtonProps={{ danger: true }}>

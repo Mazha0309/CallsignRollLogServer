@@ -12,7 +12,8 @@ export function SessionStatusTag({ status }: { status: SessionStatus | string })
 
 export function SessionSourceTag({ source }: { source: AccountSessionSource }) {
   const { t } = useI18n();
-  return <Tag color={source === 'collaboration' ? 'purple' : 'cyan'}>{t(`sessionSource.${source}`)}</Tag>;
+  const color = source === 'collaboration' ? 'purple' : source === 'shared' ? 'orange' : 'cyan';
+  return <Tag color={color}>{t(`sessionSource.${source}`)}</Tag>;
 }
 
 export function SessionRoleTag({ role }: { role: SessionRole }) {

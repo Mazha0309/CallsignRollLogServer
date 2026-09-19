@@ -15,6 +15,8 @@ const SessionsPage = lazy(() => import('./pages/app/SessionsPage'));
 const SessionDetailPage = lazy(() => import('./pages/app/SessionDetailPage'));
 const PersonalSessionDetailPage = lazy(() => import('./pages/app/PersonalSessionDetailPage'));
 const AccountPage = lazy(() => import('./pages/app/AccountPage'));
+const SharingPage = lazy(() => import('./pages/app/SharingPage'));
+const SharedSessionDetailPage = lazy(() => import('./pages/app/SharedSessionDetailPage'));
 const PersonalCloudPage = lazy(() => import('./pages/app/PersonalCloudPage'));
 const PublicArchiveListsPage = lazy(() => import('./pages/app/PublicArchiveListsPage'));
 const PublicArchiveListDetailPage = lazy(() => import('./pages/app/PublicArchiveListDetailPage'));
@@ -65,6 +67,8 @@ function AppRoutes() {
         <Route path="sessions/collaboration/:sessionId" element={<SessionDetailPage />} />
         <Route path="sessions/personal/:sessionId" element={<PersonalSessionDetailPage />} />
         <Route path="sessions/:sessionId" element={<SessionDetailPage />} />
+        <Route path="sessions/shared/:source/:sessionId" element={<SharedSessionDetailPage />} />
+        <Route path="sharing" element={<SharingPage />} />
         <Route path="personal-cloud" element={<PersonalCloudPage />} />
         <Route path="public-archives" element={<PublicArchiveListsPage />} />
         <Route path="public-archives/:listId" element={<PublicArchiveListDetailPage />} />

@@ -14,6 +14,8 @@ import type {
   AuthSession,
   CursorPage,
   ExcelExportSettings,
+  AccountShareGrant,
+  SharedSessionSummary,
   ExcelExportSettingsResponse,
   ExcelCorrectionApplyResult,
   ExcelCorrectionCapabilities,
@@ -282,6 +284,43 @@ export const accountApi = {
     unwrap(api.put<ExcelExportSettingsResponse>('/account/excel-export-settings', {
       excelExportSettings,
     })),
+  sessionShares: (box: 'inbox' | 'outbox' | 'active') =>
+    unwrap(api.get<{ items: AccountShareGrant[] }>('/account/session-shares', { params: { box } })),
+  createSessionShare: (body: {
+    granteeUsername: string;
+    includePersonal: boolean;
+    includeOwned: boolean;
+    includeEditor: boolean;
+    canJoinAs: 'editor' | 'viewer' | 'none';
+  }) => unwrap(api.post<{ share: AccountShareGrant }>('/account/session-shares', body)),
+  acceptSessionShare: (id: string) =>
+    unwrap(api.post<{ share: AccountShareGrant }>(`/account/session-shares/${encodeURIComponent(id)}/accept`, {})),
+  rejectSessionShare: (id: string) =>
+    unwrap(api.post<{ share: AccountShareGrant }>(`/account/session-shares/${encodeURIComponent(id)}/reject`, {})),
+  cancelSessionShare: (id: string) =>
+    unwrap(api.post<{ share: AccountShareGrant }>(`/account/session-shares/${encodeURIComponent(id)}/cancel`, {})),
+  revokeSessionShare: (id: string) =>
+    unwrap(api.post<{ share: AccountShareGrant }>(`/account/session-shares/${encodeURIComponent(id)}/revoke`, {})),
+  sessionShareBlocks: () =>
+    unwrap(api.get<{ items: Array<{ blockedUserId: string; username: string; createdAt: string }> }>('/account/session-share-blocks')),
+  blockSessionShare: (username: string) =>
+    unwrap(api.put<{ blockedUserId: string }>(`/account/session-share-blocks/${encodeURIComponent(username)}`)),
+  unblockSessionShare: (username: string) =>
+    unwrap(api.delete<{ blockedUserId: string }>(`/account/session-share-blocks/${encodeURIComponent(username)}`)),
+  sharedSessions: () =>
+    unwrap(api.get<{ items: SharedSessionSummary[] }>('/account/shared-sessions')),
+  sharedSession: (source: 'personal' | 'collaboration', sessionId: string) =>
+    unwrap(api.get<SharedSessionSummary>(`/account/shared-sessions/${source}/${encodeURIComponent(sessionId)}`)),
+  sharedSessionLogs: (source: 'personal' | 'collaboration', sessionId: string, params: { page: number; pageSize: number }) =>
+    unwrap(api.get<Page<LogRecord>>(`/account/shared-sessions/${source}/${encodeURIComponent(sessionId)}/logs`, { params })),
+  joinPassphrase: (sessionId: string) =>
+    unwrap(api.get<{ configured: boolean; updatedAt: string | null }>(`/sessions/${encodeURIComponent(sessionId)}/join-passphrase`)),
+  setJoinPassphrase: (sessionId: string, passphrase: string) =>
+    unwrap(api.put<{ configured: true; passphrase: string; updatedAt: string }>(`/sessions/${encodeURIComponent(sessionId)}/join-passphrase`, { passphrase })),
+  clearJoinPassphrase: (sessionId: string) =>
+    unwrap(api.delete<{ configured: false }>(`/sessions/${encodeURIComponent(sessionId)}/join-passphrase`)),
+  joinWithShare: (sessionId: string, passphrase: string) =>
+    unwrap(api.post<{ membership: { role: string; joinSource: string } }>(`/sessions/${encodeURIComponent(sessionId)}/join-with-share`, { passphrase })),
 };
 
 export interface DeviceSession {
