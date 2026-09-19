@@ -22,6 +22,7 @@ import { createCollaborationSyncV1Router } from './api/collaboration-sync-v1';
 import { createServerInfoRouter } from './api/server-info';
 import { createSessionMembershipV1Router } from './api/session-members-v1';
 import { createSessionsV1Router } from './api/sessions-v1';
+import { createSessionJoinShareV1Router } from './api/session-join-share-v1';
 import { createSessionEventRetentionV1Router } from './api/session-event-retention-v1';
 import { createLiveDraftV1Router } from './api/live-draft-v1';
 import { createPublicArchiveListsV1Router } from './api/public-archive-lists-v1';
@@ -154,6 +155,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
     createAdminGovernanceV1Router({ db, config: runtimeConfig }),
   );
   app.use('/api/v1/sessions', createSessionsV1Router({ db, config: runtimeConfig }));
+  app.use('/api/v1/sessions', createSessionJoinShareV1Router({ db, config: runtimeConfig }));
   app.use(
     '/api/v1/sessions',
     createExcelCorrectionsV1Router({ db, config: runtimeConfig }),
