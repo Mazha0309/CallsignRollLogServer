@@ -1517,6 +1517,62 @@ CREATE INDEX idx_public_archive_list_sources_user
 ON public_archive_list_sources(user_id, list_id);
 `;
 
+const ACCOUNT_SESSION_SHARING_SQL = `
+CREATE TABLE account_share_grants (
+  id TEXT PRIMARY KEY,
+  grantor_user_id TEXT NOT NULL REFERENCES users(id),
+  grantee_user_id TEXT NOT NULL REFERENCES users(id),
+  status TEXT NOT NULL CHECK (status IN (
+    'pending','accepted','rejected','cancelled','revoked','expired'
+  )),
+  include_personal INTEGER NOT NULL DEFAULT 1 CHECK (include_personal IN (0,1)),
+  include_owned INTEGER NOT NULL DEFAULT 1 CHECK (include_owned IN (0,1)),
+  include_editor INTEGER NOT NULL DEFAULT 1 CHECK (include_editor IN (0,1)),
+  can_join_as TEXT NOT NULL DEFAULT 'editor' CHECK (can_join_as IN ('editor','viewer','none')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  responded_at TEXT,
+  revoked_at TEXT,
+  expires_at TEXT,
+  CHECK (grantor_user_id <> grantee_user_id),
+  CHECK (include_personal + include_owned + include_editor >= 1)
+);
+
+CREATE UNIQUE INDEX idx_account_share_open_pair
+ON account_share_grants(grantor_user_id, grantee_user_id)
+WHERE status IN ('pending', 'accepted');
+
+CREATE TABLE account_share_blocks (
+  blocker_user_id TEXT NOT NULL REFERENCES users(id),
+  blocked_user_id TEXT NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (blocker_user_id, blocked_user_id),
+  CHECK (blocker_user_id <> blocked_user_id)
+);
+
+CREATE TABLE session_join_passphrases (
+  session_id TEXT PRIMARY KEY REFERENCES sessions(id),
+  passphrase_hash TEXT NOT NULL,
+  passphrase_salt TEXT NOT NULL,
+  updated_by TEXT NOT NULL REFERENCES users(id),
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE account_share_audit_events (
+  id TEXT PRIMARY KEY,
+  action TEXT NOT NULL,
+  actor_user_id TEXT NOT NULL REFERENCES users(id),
+  grant_id TEXT,
+  target_user_id TEXT,
+  session_id TEXT,
+  request_id TEXT NOT NULL,
+  mutation_id TEXT NOT NULL,
+  before_json TEXT,
+  after_json TEXT,
+  occurred_at TEXT NOT NULL
+);
+`;
+
 const SESSION_COLUMNS: ReadonlyArray<readonly [string, string]> = [
   ['version', 'INTEGER NOT NULL DEFAULT 1'],
   ['event_seq', 'INTEGER NOT NULL DEFAULT 0'],
@@ -2219,6 +2275,21 @@ const migrations: readonly Migration[] = [
     up(db) {
       widenServerConfigOverridesForLlm(db);
       db.exec(LLM_EXCEL_CORRECTION_PREVIEWS_SQL);
+    },
+  },
+  {
+    version: 29,
+    name: 'account_session_sharing',
+    checksum: checksum('29', 'account_session_sharing', ACCOUNT_SESSION_SHARING_SQL),
+    up(db) {
+      db.exec(ACCOUNT_SESSION_SHARING_SQL);
+      addColumnIfMissing(
+        db,
+        'session_members',
+        'join_source',
+        "TEXT NOT NULL DEFAULT 'invite'",
+      );
+      addColumnIfMissing(db, 'session_members', 'account_share_grant_id', 'TEXT');
     },
   },
 ];
