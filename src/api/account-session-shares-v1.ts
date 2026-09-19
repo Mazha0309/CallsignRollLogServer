@@ -13,6 +13,11 @@ import {
   updateShareGrant,
 } from '../account-share/service';
 import { parseShareScope } from '../account-share/access';
+import {
+  getSharedSessionDetail,
+  listSharedSessionLogs,
+  listSharedSessions,
+} from '../account-share/catalog';
 import { AppConfig, config } from '../config';
 import { getDb } from '../db/database';
 import { AppError } from '../errors/app-error';
@@ -208,6 +213,49 @@ export function createAccountSessionSharesV1Router(
         body: payload,
       });
       res.json(payload);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/shared-sessions', (req: V1AuthRequest, res, next) => {
+    try {
+      res.json(listSharedSessions(database(), req.auth!.userId));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/shared-sessions/:source/:sessionId', (req: V1AuthRequest, res, next) => {
+    try {
+      const source = req.params.source;
+      if (source !== 'personal' && source !== 'collaboration') {
+        throw new AppError(422, 'VALIDATION_FAILED', 'source is invalid', { field: 'source' });
+      }
+      res.json(getSharedSessionDetail(
+        database(),
+        req.auth!.userId,
+        source,
+        req.params.sessionId,
+      ));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/shared-sessions/:source/:sessionId/logs', (req: V1AuthRequest, res, next) => {
+    try {
+      const source = req.params.source;
+      if (source !== 'personal' && source !== 'collaboration') {
+        throw new AppError(422, 'VALIDATION_FAILED', 'source is invalid', { field: 'source' });
+      }
+      res.json(listSharedSessionLogs(
+        database(),
+        req.auth!.userId,
+        source,
+        req.params.sessionId,
+        req.query as Record<string, unknown>,
+      ));
     } catch (error) {
       next(error);
     }
