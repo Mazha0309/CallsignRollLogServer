@@ -396,6 +396,12 @@ describe('account session share HTTP API', () => {
     assert.equal(stolen.body.error.code, 'ACCOUNT_SHARE_NOT_GRANTEE');
   });
 
+  test('server-info advertises accountSessionSharing', async () => {
+    const result = await request('/api/v1/server-info');
+    assert.equal(result.status, 200);
+    assert.ok(result.body.features.includes('accountSessionSharing'));
+  });
+
   test('block rejects inbound requests', async () => {
     const blocked = await request('/api/v1/account/session-share-blocks/bob', {
       method: 'PUT',
