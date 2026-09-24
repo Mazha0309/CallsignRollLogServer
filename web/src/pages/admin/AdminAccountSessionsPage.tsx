@@ -30,7 +30,7 @@ export default function AdminAccountSessionsPage() {
     page,
     pageSize,
     q: query || undefined,
-    source,
+    source: source === 'shared' ? undefined : source,
     status,
     role: source === 'personal' ? undefined : role,
     includeDeleted: includeDeleted || undefined,

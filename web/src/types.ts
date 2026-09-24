@@ -342,7 +342,7 @@ export interface PublicArchiveSession {
   id: string;
   listId: string;
   sourceUserId: string;
-  sourceKind: AccountSessionSource;
+  sourceKind: 'personal' | 'collaboration';
   sourceSessionId: string;
   title: string;
   closedAt: string;
@@ -351,7 +351,8 @@ export interface PublicArchiveSession {
   snapshotAt: string;
 }
 
-export interface AvailableArchiveSourceSession extends Omit<AccountSessionSummary, 'status'> {
+export interface AvailableArchiveSourceSession extends Omit<AccountSessionSummary, 'status' | 'source'> {
+  source: 'personal' | 'collaboration';
   status: 'closed';
 }
 
