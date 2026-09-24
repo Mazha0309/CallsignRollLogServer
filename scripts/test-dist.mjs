@@ -431,6 +431,11 @@ try {
     { version: 28, name: 'llm_excel_correction_previews' },
     'production dist must include the LLM Excel correction migration',
   );
+  assert.deepEqual(
+    db.prepare('SELECT version, name FROM schema_migrations WHERE version = 29').get(),
+    { version: 29, name: 'account_session_sharing' },
+    'production dist must include the account session sharing migration',
+  );
   assert.equal(Number(db.pragma('foreign_keys', { simple: true })), 1);
   assert.equal(String(db.pragma('journal_mode', { simple: true })).toLowerCase(), 'wal');
 

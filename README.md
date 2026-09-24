@@ -10,6 +10,7 @@ OpenLogTool 配套服务端，提供用户认证、Session/日志持久化、管
 - [Account Excel Export Settings API v1](docs/account-excel-export-settings-api-v1.md)
 - [Public Live Share Statistics API v1](docs/public-liveshare-statistics-api-v1.md)
 - [Public Archive Lists API v1](docs/public-archive-lists-api-v1.md)
+- [Account Session Sharing API v1](docs/account-session-sharing-api-v1.md)
 
 ## 技术栈
 

@@ -3,9 +3,10 @@
 ## 状态
 
 - spec：已确认（中文）
-- plan：已写好，**实现还没开始**
-- 代码：无功能代码，只有文档 commit
-- 未完成：计划里 Task 1–10 全部未勾选
+- plan：已写好
+- 代码：服务端 + Web 已落地于本分支 `feature/account-session-sharing`（`a1eccd0` 起）
+- 客户端：`openlogtool` `dev` 有未提交草稿，尚未合入
+- 文档：`docs/account-session-sharing-api-v1.md` + README 接口表
 
 ## 仓库
 
@@ -56,6 +57,7 @@ flutter test test/screens/session_hub_page_test.dart \
 
 ## 文档债（实现结束前必须做）
 
-- [ ] `docs/account-session-sharing-api-v1.md`
-- [ ] `README.md` 接口表和 `accountSessionSharing` 能力说明
-- [ ] 本文件更新为「已落地」并填入真实 commit hash
+- [x] `docs/account-session-sharing-api-v1.md`
+- [x] `README.md` 接口表和 `accountSessionSharing` 能力说明
+- [ ] 客户端共享标识合入 `openlogtool` `dev` 并跑 `flutter test`
+- [ ] 本分支合入主仓库 `dev` 后填最终 commit hash

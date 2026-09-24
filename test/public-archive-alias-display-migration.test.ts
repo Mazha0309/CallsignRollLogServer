@@ -26,7 +26,11 @@ test('migration v26 backfills legacy public archive alias display case without c
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
-      DELETE FROM schema_migrations WHERE version IN (26, 27, 28);
+      DROP TABLE account_share_audit_events;
+      DROP TABLE session_join_passphrases;
+      DROP TABLE account_share_blocks;
+      DROP TABLE account_share_grants;
+      DELETE FROM schema_migrations WHERE version IN (26, 27, 28, 29);
     `);
     db.prepare(`INSERT INTO users (id, username, password_hash, role, created_at, updated_at)
       VALUES ('owner', 'owner', 'hash', 'user', ?, ?)`).run(NOW, NOW);

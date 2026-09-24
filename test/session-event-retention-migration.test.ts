@@ -165,11 +165,15 @@ function restoreV11Fixture(db: Database.Database): void {
     DROP TABLE admin_governance_audit_events;
     DROP TABLE live_draft_device_state;
     DROP TABLE session_live_drafts;
+    DROP TABLE account_share_audit_events;
+    DROP TABLE session_join_passphrases;
+    DROP TABLE account_share_blocks;
+    DROP TABLE account_share_grants;
     DROP TRIGGER trg_sessions_event_cursor_valid_insert;
     DROP TRIGGER trg_sessions_event_cursor_monotonic_update;
     DROP TABLE admin_audit_events;
   `);
-  db.prepare('DELETE FROM schema_migrations WHERE version IN (12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28)').run();
+  db.prepare('DELETE FROM schema_migrations WHERE version IN (12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29)').run();
   db.exec(V11_ADMIN_AUDIT_SQL);
 }
 

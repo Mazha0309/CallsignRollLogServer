@@ -201,8 +201,12 @@ function restoreV10Fixture(db: Database.Database): void {
     DROP TABLE public_shares;
     DROP TABLE collaboration_audit_events;
     ALTER TABLE server_settings DROP COLUMN public_share_hmac_fingerprint;
+    DROP TABLE account_share_audit_events;
+    DROP TABLE session_join_passphrases;
+    DROP TABLE account_share_blocks;
+    DROP TABLE account_share_grants;
   `);
-  db.prepare('DELETE FROM schema_migrations WHERE version IN (11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28)').run();
+  db.prepare('DELETE FROM schema_migrations WHERE version IN (11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29)').run();
   db.exec(V10_COLLABORATION_AUDIT_SQL);
 }
 
