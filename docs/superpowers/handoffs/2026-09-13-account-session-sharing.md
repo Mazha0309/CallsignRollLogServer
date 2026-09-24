@@ -5,7 +5,7 @@
 - spec：已确认（中文）
 - plan：已写好
 - 代码：服务端 + Web 已落地于本分支 `feature/account-session-sharing`（`a1eccd0` 起）
-- 客户端：`openlogtool` `dev` 有未提交草稿，尚未合入
+- 客户端：`openlogtool` `dev` 准备单独提交共享入口（收件箱接受 + 共享会话只读浏览），尚未合入服务端 `dev`
 - 文档：`docs/account-session-sharing-api-v1.md` + README 接口表
 
 ## 仓库

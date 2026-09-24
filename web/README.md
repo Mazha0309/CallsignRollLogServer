@@ -46,3 +46,10 @@ links such as `/BR5AI` and `/BR5AI/session/:archiveSessionId`; the internal
 member link is `/live/list/:listId`. Archive pages are tokenless and do not use
 the authenticated access token, refresh cookie, LiveShare WebSocket, or
 LiveShare visitor tracking.
+
+## Account session sharing
+
+The member workspace at `/app/sharing` manages request-based account-to-account
+session sharing: inbox/outbox, accept/reject, and the read-only shared session
+catalog. Joining a grantor's owned collaboration session still requires that
+session's passphrase.
