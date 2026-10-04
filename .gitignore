@@ -1,4 +1,7 @@
 node_modules/
+web-client/
+web-client.backup-*/
+.web-client-stage-*/
 dist/
 data/
 .env

@@ -472,7 +472,7 @@ function accepted(
 export function mutateLog(
   db: Database.Database,
   session: SessionRow,
-  membership: MembershipRow,
+  membership: Pick<MembershipRow, 'role'>,
   operation: MutationOperation,
   userId: string,
   deviceId: string,

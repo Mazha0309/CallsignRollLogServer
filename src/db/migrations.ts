@@ -1517,6 +1517,126 @@ CREATE INDEX idx_public_archive_list_sources_user
 ON public_archive_list_sources(user_id, list_id);
 `;
 
+const ACCOUNT_SESSION_SHARING_SQL = `
+CREATE TABLE account_share_grants (
+  id TEXT PRIMARY KEY,
+  grantor_user_id TEXT NOT NULL REFERENCES users(id),
+  grantee_user_id TEXT NOT NULL REFERENCES users(id),
+  status TEXT NOT NULL CHECK (status IN (
+    'pending','accepted','rejected','cancelled','revoked','expired'
+  )),
+  include_personal INTEGER NOT NULL DEFAULT 1 CHECK (include_personal IN (0,1)),
+  include_owned INTEGER NOT NULL DEFAULT 1 CHECK (include_owned IN (0,1)),
+  include_editor INTEGER NOT NULL DEFAULT 1 CHECK (include_editor IN (0,1)),
+  can_join_as TEXT NOT NULL DEFAULT 'editor' CHECK (can_join_as IN ('editor','viewer','none')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  responded_at TEXT,
+  revoked_at TEXT,
+  expires_at TEXT,
+  CHECK (grantor_user_id <> grantee_user_id),
+  CHECK (include_personal + include_owned + include_editor >= 1)
+);
+
+CREATE UNIQUE INDEX idx_account_share_open_pair
+ON account_share_grants(grantor_user_id, grantee_user_id)
+WHERE status IN ('pending', 'accepted');
+
+CREATE TABLE account_share_blocks (
+  blocker_user_id TEXT NOT NULL REFERENCES users(id),
+  blocked_user_id TEXT NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (blocker_user_id, blocked_user_id),
+  CHECK (blocker_user_id <> blocked_user_id)
+);
+
+CREATE TABLE session_join_passphrases (
+  session_id TEXT PRIMARY KEY REFERENCES sessions(id),
+  passphrase_hash TEXT NOT NULL,
+  passphrase_salt TEXT NOT NULL,
+  updated_by TEXT NOT NULL REFERENCES users(id),
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE account_share_audit_events (
+  id TEXT PRIMARY KEY,
+  action TEXT NOT NULL,
+  actor_user_id TEXT NOT NULL REFERENCES users(id),
+  grant_id TEXT,
+  target_user_id TEXT,
+  session_id TEXT,
+  request_id TEXT NOT NULL,
+  mutation_id TEXT NOT NULL,
+  before_json TEXT,
+  after_json TEXT,
+  occurred_at TEXT NOT NULL
+);
+`;
+
+const FRIEND_COLLABORATION_SQL = `
+CREATE TABLE friend_requests (
+  id TEXT PRIMARY KEY,
+  sender_id TEXT NOT NULL REFERENCES users(id),
+  recipient_id TEXT NOT NULL REFERENCES users(id),
+  status TEXT NOT NULL CHECK (status IN ('pending','accepted','rejected','cancelled','removed','expired')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  CHECK (sender_id <> recipient_id)
+);
+CREATE UNIQUE INDEX idx_friend_open_pair
+ON friend_requests(MIN(sender_id, recipient_id), MAX(sender_id, recipient_id))
+WHERE status IN ('pending','accepted');
+CREATE INDEX idx_friend_recipient ON friend_requests(recipient_id, status);
+CREATE INDEX idx_friend_sender ON friend_requests(sender_id, status);
+CREATE TABLE friend_blocks (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  blocked_user_id TEXT NOT NULL REFERENCES users(id),
+  PRIMARY KEY(user_id, blocked_user_id),
+  CHECK (user_id <> blocked_user_id)
+);
+CREATE TABLE session_friend_access (
+  session_id TEXT PRIMARY KEY REFERENCES sessions(id),
+  visibility TEXT NOT NULL CHECK (visibility IN ('private','friends')),
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE session_access_requests (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id),
+  sender_id TEXT NOT NULL REFERENCES users(id),
+  recipient_id TEXT NOT NULL REFERENCES users(id),
+  kind TEXT NOT NULL CHECK (kind IN ('invitation','application')),
+  role TEXT NOT NULL CHECK (role IN ('editor','viewer')),
+  status TEXT NOT NULL CHECK (status IN ('pending','accepted','rejected','cancelled','expired')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  CHECK(sender_id <> recipient_id)
+);
+CREATE UNIQUE INDEX idx_session_access_pending
+ON session_access_requests(session_id, CASE WHEN kind = 'invitation' THEN recipient_id ELSE sender_id END)
+WHERE status = 'pending';
+CREATE INDEX idx_session_access_recipient ON session_access_requests(recipient_id, status);
+CREATE INDEX idx_session_access_sender ON session_access_requests(sender_id, status);
+CREATE TRIGGER trg_session_friend_owner_changed
+AFTER UPDATE OF owner_user_id ON sessions
+WHEN NEW.owner_user_id <> OLD.owner_user_id
+BEGIN
+  DELETE FROM session_friend_access WHERE session_id = NEW.id;
+  UPDATE session_access_requests SET status = 'cancelled', updated_at = NEW.updated_at
+  WHERE session_id = NEW.id AND status = 'pending';
+END;
+CREATE TABLE social_audit_events (
+  id TEXT PRIMARY KEY,
+  actor_user_id TEXT NOT NULL REFERENCES users(id),
+  action TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  occurred_at TEXT NOT NULL
+);
+UPDATE processed_mutations SET response_json = json_remove(response_json, '$.passphrase')
+WHERE json_valid(response_json) AND json_type(response_json, '$.passphrase') = 'text';
+`;
+
 const SESSION_COLUMNS: ReadonlyArray<readonly [string, string]> = [
   ['version', 'INTEGER NOT NULL DEFAULT 1'],
   ['event_seq', 'INTEGER NOT NULL DEFAULT 0'],
@@ -2219,6 +2339,69 @@ const migrations: readonly Migration[] = [
     up(db) {
       widenServerConfigOverridesForLlm(db);
       db.exec(LLM_EXCEL_CORRECTION_PREVIEWS_SQL);
+    },
+  },
+  {
+    version: 29,
+    name: 'account_session_sharing',
+    checksum: checksum('29', 'account_session_sharing', ACCOUNT_SESSION_SHARING_SQL),
+    up(db) {
+      db.exec(ACCOUNT_SESSION_SHARING_SQL);
+      addColumnIfMissing(
+        db,
+        'session_members',
+        'join_source',
+        "TEXT NOT NULL DEFAULT 'invite'",
+      );
+      addColumnIfMissing(db, 'session_members', 'account_share_grant_id', 'TEXT');
+    },
+  },
+  {
+    version: 30,
+    name: 'friends_and_session_requests',
+    checksum: checksum('30', 'friends_and_session_requests', FRIEND_COLLABORATION_SQL),
+    up(db) { db.exec(FRIEND_COLLABORATION_SQL); },
+  },
+  {
+    version: 31,
+    name: 'friend_session_direct_join',
+    checksum: checksum('31', 'friend_session_direct_join', 'default-approval-viewer:join-policy-role-checks:v1'),
+    up(db) {
+      addColumnIfMissing(db, 'session_friend_access', 'join_policy', "TEXT NOT NULL DEFAULT 'approval' CHECK (join_policy IN ('approval','direct'))");
+      addColumnIfMissing(db, 'session_friend_access', 'default_role', "TEXT NOT NULL DEFAULT 'viewer' CHECK (default_role IN ('viewer','editor'))");
+    },
+  },
+  {
+    version: 32,
+    name: 'batch_session_share_permissions',
+    checksum: checksum('32', 'batch_session_share_permissions', 'selected-sources-and-log-capabilities:v1'),
+    up(db) {
+      addColumnIfMissing(db, 'account_share_grants', 'scope_mode', "TEXT NOT NULL DEFAULT 'all' CHECK (scope_mode IN ('all','selected'))");
+      addColumnIfMissing(db, 'account_share_grants', 'selected_sessions_json', "TEXT NOT NULL DEFAULT '[]'");
+      addColumnIfMissing(db, 'account_share_grants', 'can_edit_logs', 'INTEGER NOT NULL DEFAULT 0 CHECK (can_edit_logs IN (0,1))');
+      addColumnIfMissing(db, 'account_share_grants', 'can_delete_logs', 'INTEGER NOT NULL DEFAULT 0 CHECK (can_delete_logs IN (0,1))');
+    },
+  },
+  {
+    version: 33,
+    name: 'personal_session_promotions',
+    checksum: checksum('33', 'personal_session_promotions', 'owner-scoped-alias-and-original-backup:v1', 'web-client-url-override:v1'),
+    up: (db) => {
+      addColumnIfMissing(db, 'account_share_grants', 'personal_edit_requires_collaboration', 'INTEGER NOT NULL DEFAULT 0 CHECK (personal_edit_requires_collaboration IN (0,1))');
+      db.exec(`CREATE TABLE IF NOT EXISTS personal_session_promotions (
+        owner_user_id TEXT NOT NULL REFERENCES users(id),
+        session_id TEXT NOT NULL REFERENCES sessions(id),
+        original_snapshot_json TEXT NOT NULL,
+        promoted_at TEXT NOT NULL,
+        PRIMARY KEY (owner_user_id, session_id)
+      )`);
+      const definition = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'server_config_overrides'").pluck().get() as string;
+      if (!definition.includes("'webClientUrl'")) {
+        db.exec(`ALTER TABLE server_config_overrides RENAME TO server_config_overrides_v32;
+          ${LLM_SERVER_CONFIG_OVERRIDES_SQL.replace("'llmProvider',", "'webClientUrl', 'llmProvider',")}
+          INSERT INTO server_config_overrides SELECT * FROM server_config_overrides_v32;
+          DROP TABLE server_config_overrides_v32;`);
+      }
     },
   },
 ];

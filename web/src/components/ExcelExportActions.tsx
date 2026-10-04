@@ -53,7 +53,7 @@ function StylePreview({ settings }: { settings: ExcelExportSettings }) {
     <div className="excel-style-preview" style={{ fontFamily }}>
       <div style={{ background: settings.headerBackgroundColor }}>{settings.headerText || ' '}</div>
       <div style={{ background: settings.headerRowBackgroundColor }}>#　时间　呼号　RST发　RST收　QTH</div>
-      <div style={{ background: settings.controllerBackgroundColor, fontWeight: 700 }}>点名主控:　20:00　BG5CTRL</div>
+      <div style={{ background: settings.controllerBackgroundColor, fontWeight: 700 }}>点名主控:　20:00　BG5CRL</div>
       <div style={{ background: settings.tableBackgroundColor }}>1　20:01　BG5CRL　59　59　杭州</div>
       <div style={{ background: settings.useAlternateColors ? settings.alternateRowColor : settings.tableBackgroundColor }}>2　20:02　BG5ABC　59　59　宁波</div>
     </div>

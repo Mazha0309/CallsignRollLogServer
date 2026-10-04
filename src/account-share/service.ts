@@ -1,0 +1,637 @@
+import { randomUUID } from 'crypto';
+import Database from 'better-sqlite3';
+import { usernameIdentity } from '../auth/username-identity';
+import { appendCollaborationAudit } from '../collaboration/audit';
+import { getRealtimeHub } from '../collaboration/realtime';
+import { getLiveDraftLockManager } from '../collaboration/live-draft';
+import { AppError } from '../errors/app-error';
+import { appendAccountShareAudit } from './audit';
+import { parseShareScope } from './access';
+import { resolveBatchShareOptions, grantSelectsSession } from './selection';
+import {
+  AccountShareGrantDto,
+  AccountShareGrantRow,
+  PENDING_INBOX_CAP,
+  PENDING_TTL_MS,
+  ShareJoinRole,
+  grantDto,
+  sameShareScope,
+  BatchShareOptions,
+} from './model';
+
+export interface ShareMutationContext {
+  grantorUserId?: string;
+  actorUserId?: string;
+  granteeUsername?: string;
+  grantId?: string;
+  includePersonal?: boolean;
+  includeOwned?: boolean;
+  includeEditor?: boolean;
+  canJoinAs?: ShareJoinRole;
+  expiresAt?: string | null;
+  requestId: string;
+  mutationId: string;
+}
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function normalizedFutureExpiry(value: string | null): string | null {
+  if (value === null) return null;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp) || timestamp <= Date.now()) {
+    throw new AppError(422, 'VALIDATION_FAILED', 'expiresAt must be a future timestamp');
+  }
+  return new Date(timestamp).toISOString();
+}
+
+export function expireShareGrants(db: Database.Database): void {
+  db.transaction(() => {
+    const expired = db.prepare(`SELECT * FROM account_share_grants WHERE status = 'accepted' AND expires_at IS NOT NULL AND expires_at <= ?`).all(nowIso()) as AccountShareGrantRow[];
+    for (const grant of expired) {
+      revokeAcceptedGrant(db, grant, { actorUserId: grant.grantor_user_id, requestId: randomUUID(), mutationId: randomUUID() });
+      db.prepare("UPDATE account_share_grants SET status = 'expired' WHERE id = ?").run(grant.id);
+    }
+    db.prepare(`UPDATE account_share_grants SET status = 'expired', updated_at = ? WHERE status = 'pending' AND
+      ((expires_at IS NOT NULL AND expires_at <= ?) OR created_at <= ?)`)
+      .run(nowIso(), nowIso(), new Date(Date.now() - PENDING_TTL_MS).toISOString());
+  })();
+}
+
+function findActiveUserByUsername(
+  db: Database.Database,
+  username: string,
+): { id: string } | undefined {
+  return db.prepare(`
+    SELECT id FROM users
+    WHERE username_identity(username) = ?
+      AND disabled_at IS NULL
+      AND deleted_at IS NULL
+  `).get(usernameIdentity(username)) as { id: string } | undefined;
+}
+
+function isBlocked(
+  db: Database.Database,
+  blockerUserId: string,
+  blockedUserId: string,
+): boolean {
+  return Boolean(db.prepare(`
+    SELECT 1 FROM account_share_blocks
+    WHERE blocker_user_id = ? AND blocked_user_id = ?
+  `).get(blockerUserId, blockedUserId));
+}
+
+function loadGrant(db: Database.Database, grantId: string): AccountShareGrantRow {
+  const row = db.prepare('SELECT * FROM account_share_grants WHERE id = ?').get(grantId) as
+    | AccountShareGrantRow
+    | undefined;
+  if (!row) {
+    throw new AppError(404, 'NOT_FOUND', 'Share request not found');
+  }
+  return row;
+}
+
+function pendingInboxCount(db: Database.Database, granteeUserId: string): number {
+  return Number(db.prepare(`
+    SELECT COUNT(*) FROM account_share_grants
+    WHERE grantee_user_id = ? AND status = 'pending'
+  `).pluck().get(granteeUserId));
+}
+
+function findOpenPair(
+  db: Database.Database,
+  grantorUserId: string,
+  granteeUserId: string,
+): AccountShareGrantRow | undefined {
+  return db.prepare(`
+    SELECT * FROM account_share_grants
+    WHERE grantor_user_id = ? AND grantee_user_id = ? AND status IN ('pending', 'accepted')
+  `).get(grantorUserId, granteeUserId) as AccountShareGrantRow | undefined;
+}
+
+export function createShareRequest(
+  db: Database.Database,
+  input: BatchShareOptions & {
+    grantorUserId: string;
+    granteeUsername: string;
+    includePersonal: boolean;
+    includeOwned: boolean;
+    includeEditor: boolean;
+    canJoinAs: ShareJoinRole;
+    expiresAt?: string | null;
+    requestId: string;
+    mutationId: string;
+  },
+): AccountShareGrantDto {
+  const scope = parseShareScope(input);
+  expireShareGrants(db);
+  return db.transaction(() => {
+    const grantee = findActiveUserByUsername(db, input.granteeUsername);
+    if (!grantee) {
+      throw new AppError(404, 'ACCOUNT_SHARE_USER_NOT_FOUND', 'Share target was not found');
+    }
+    if (grantee.id === input.grantorUserId) {
+      throw new AppError(400, 'ACCOUNT_SHARE_SELF', 'An account cannot share with itself');
+    }
+    if (
+      isBlocked(db, grantee.id, input.grantorUserId) ||
+      isBlocked(db, input.grantorUserId, grantee.id)
+    ) {
+      throw new AppError(403, 'ACCOUNT_SHARE_BLOCKED', 'This share is blocked');
+    }
+    const existing = findOpenPair(db, input.grantorUserId, grantee.id);
+    const batch = resolveBatchShareOptions(db, input.grantorUserId, input);
+    if ((batch.canEditLogs || batch.canDeleteLogs) && scope.includeEditor) {
+      throw new AppError(422, 'VALIDATION_FAILED', 'You cannot grant write access to another owner’s sessions');
+    }
+    if (batch.selectedSessions.some(row => row.source === 'personal' ? !scope.includePersonal : !scope.includeOwned)) {
+      throw new AppError(422, 'VALIDATION_FAILED', 'Selection contains a disabled source');
+    }
+    if (existing) {
+      if (sameShareScope(existing, scope) && existing.scope_mode === batch.scopeMode &&
+          existing.selected_sessions_json === JSON.stringify(batch.selectedSessions) &&
+          existing.can_edit_logs === Number(batch.canEditLogs) && existing.can_delete_logs === Number(batch.canDeleteLogs) &&
+          existing.personal_edit_requires_collaboration === Number(batch.requireCollaborationForPersonalEdits)) return grantDto(existing);
+      throw new AppError(
+        409,
+        'ACCOUNT_SHARE_PENDING_EXISTS',
+        'An open share already exists for this pair',
+      );
+    }
+    if (pendingInboxCount(db, grantee.id) >= PENDING_INBOX_CAP) {
+      throw new AppError(409, 'ACCOUNT_SHARE_INBOX_FULL', 'The share inbox is full');
+    }
+    const now = nowIso();
+    const expiresAt = normalizedFutureExpiry(input.expiresAt ?? null);
+    const id = randomUUID();
+    db.prepare(`
+      INSERT INTO account_share_grants (
+        id, grantor_user_id, grantee_user_id, status,
+        include_personal, include_owned, include_editor, can_join_as,
+        created_at, updated_at, expires_at, scope_mode, selected_sessions_json, can_edit_logs, can_delete_logs, personal_edit_requires_collaboration
+      ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      input.grantorUserId,
+      grantee.id,
+      scope.includePersonal ? 1 : 0,
+      scope.includeOwned ? 1 : 0,
+      scope.includeEditor ? 1 : 0,
+      scope.canJoinAs,
+      now,
+      now,
+      expiresAt,
+      batch.scopeMode,
+      JSON.stringify(batch.selectedSessions),
+      Number(batch.canEditLogs),
+      Number(batch.canDeleteLogs),
+      Number(batch.requireCollaborationForPersonalEdits),
+    );
+    appendAccountShareAudit(db, {
+      action: 'account_share.requested',
+      actorUserId: input.grantorUserId,
+      requestId: input.requestId,
+      mutationId: input.mutationId,
+      grantId: id,
+      targetUserId: grantee.id,
+      after: { status: 'pending', ...scope, ...batch },
+      occurredAt: now,
+    });
+    return grantDto(loadGrant(db, id));
+  })();
+}
+
+export function acceptShareRequest(
+  db: Database.Database,
+  input: {
+    grantId: string;
+    actorUserId: string;
+    requestId: string;
+    mutationId: string;
+  },
+): AccountShareGrantDto {
+  expireShareGrants(db);
+  return db.transaction(() => {
+    const grant = loadGrant(db, input.grantId);
+    if (grant.grantee_user_id !== input.actorUserId) {
+      throw new AppError(403, 'ACCOUNT_SHARE_NOT_GRANTEE', 'Only the grantee can accept');
+    }
+    if (grant.status !== 'pending') {
+      throw new AppError(409, 'ACCOUNT_SHARE_PENDING_EXISTS', 'Share request is not pending');
+    }
+    const now = nowIso();
+    db.prepare(`
+      UPDATE account_share_grants
+      SET status = 'accepted', responded_at = ?, updated_at = ?
+      WHERE id = ?
+    `).run(now, now, grant.id);
+    appendAccountShareAudit(db, {
+      action: 'account_share.accepted',
+      actorUserId: input.actorUserId,
+      requestId: input.requestId,
+      mutationId: input.mutationId,
+      grantId: grant.id,
+      targetUserId: grant.grantor_user_id,
+      before: { status: grant.status },
+      after: { status: 'accepted' },
+      occurredAt: now,
+    });
+    return grantDto(loadGrant(db, grant.id));
+  })();
+}
+
+export function revokeShareGrant(
+  db: Database.Database,
+  input: {
+    grantId: string;
+    actorUserId: string;
+    requestId: string;
+    mutationId: string;
+  },
+): AccountShareGrantDto {
+  return db.transaction(() => {
+    const grant = loadGrant(db, input.grantId);
+    if (grant.grantor_user_id !== input.actorUserId) {
+      throw new AppError(403, 'FORBIDDEN', 'Only the grantor can revoke');
+    }
+    if (grant.status !== 'accepted') {
+      throw new AppError(409, 'ACCOUNT_SHARE_PENDING_EXISTS', 'Share grant is not accepted');
+    }
+    return revokeAcceptedGrant(db, grant, input);
+  })();
+}
+
+function revokeShareMemberships(
+  db: Database.Database,
+  grant: AccountShareGrantRow,
+  input: { actorUserId: string; requestId: string; mutationId: string },
+  retain?: (sessionId: string, role: string) => boolean,
+): void {
+  const now = nowIso();
+  const members = db.prepare(`
+    SELECT id, session_id, user_id, role, version
+    FROM session_members
+    WHERE account_share_grant_id = ?
+      AND join_source = 'account_share'
+      AND removed_at IS NULL
+  `).all(grant.id) as Array<{
+    id: string;
+    session_id: string;
+    user_id: string;
+    role: 'owner' | 'editor' | 'viewer';
+    version: number;
+  }>;
+  for (const member of members) {
+    if (retain?.(member.session_id, member.role)) continue;
+    db.prepare(`
+      UPDATE session_members
+      SET removed_at = ?, version = version + 1, updated_at = ?
+      WHERE id = ? AND removed_at IS NULL
+    `).run(now, now, member.id);
+    // Run transport effects after the synchronous transaction has committed.
+    // Recheck the durable row so a rolled-back revoke cannot kick a member.
+    queueMicrotask(() => {
+      if (!db.open || !db.prepare('SELECT 1 FROM session_members WHERE id = ? AND removed_at IS NOT NULL').get(member.id)) return;
+      db.prepare('DELETE FROM live_draft_device_state WHERE session_id = ? AND user_id = ?').run(member.session_id, member.user_id);
+      const released = getLiveDraftLockManager(db).clearUser(member.session_id, member.user_id);
+      const hub = getRealtimeHub(db);
+      if (released.length) hub.publishControl({ type: 'liveDraft.lockChanged', sessionId: member.session_id,
+        occurredAt: nowIso(), action: 'membershipRevoked', fields: released.map(lock => lock.field) });
+      hub.revoke(member.session_id, member.user_id);
+    });
+    const updated = db.prepare('SELECT version FROM session_members WHERE id = ?').get(member.id) as {
+      version: number;
+    };
+    appendCollaborationAudit(db, {
+      action: 'membership.removed',
+      sessionId: member.session_id,
+      actorUserId: input.actorUserId,
+      targetUserId: member.user_id,
+      requestId: input.requestId,
+      mutationId: `${input.mutationId}:${member.id}`,
+      occurredAt: now,
+      role: member.role,
+      beforeVersion: member.version,
+      afterVersion: updated.version,
+      removedAt: now,
+    });
+  }
+}
+
+function revokeAcceptedGrant(
+  db: Database.Database,
+  grant: AccountShareGrantRow,
+  input: { actorUserId: string; requestId: string; mutationId: string },
+): AccountShareGrantDto {
+  const now = nowIso();
+  revokeShareMemberships(db, grant, input);
+  db.prepare(`
+    UPDATE account_share_grants
+    SET status = 'revoked', revoked_at = ?, updated_at = ?
+    WHERE id = ?
+  `).run(now, now, grant.id);
+  appendAccountShareAudit(db, {
+    action: 'account_share.revoked',
+    actorUserId: input.actorUserId,
+    requestId: input.requestId,
+    mutationId: input.mutationId,
+    grantId: grant.id,
+    targetUserId: grant.grantee_user_id,
+    before: { status: grant.status },
+    after: { status: 'revoked' },
+    occurredAt: now,
+  });
+  return grantDto(loadGrant(db, grant.id));
+}
+
+export function rejectShareRequest(
+  db: Database.Database,
+  input: {
+    grantId: string;
+    actorUserId: string;
+    requestId: string;
+    mutationId: string;
+  },
+): AccountShareGrantDto {
+  return db.transaction(() => {
+    const grant = loadGrant(db, input.grantId);
+    if (grant.grantee_user_id !== input.actorUserId) {
+      throw new AppError(403, 'ACCOUNT_SHARE_NOT_GRANTEE', 'Only the grantee can reject');
+    }
+    if (grant.status !== 'pending') {
+      throw new AppError(409, 'ACCOUNT_SHARE_PENDING_EXISTS', 'Share request is not pending');
+    }
+    const now = nowIso();
+    db.prepare(`
+      UPDATE account_share_grants
+      SET status = 'rejected', responded_at = ?, updated_at = ?
+      WHERE id = ?
+    `).run(now, now, grant.id);
+    appendAccountShareAudit(db, {
+      action: 'account_share.rejected',
+      actorUserId: input.actorUserId,
+      requestId: input.requestId,
+      mutationId: input.mutationId,
+      grantId: grant.id,
+      targetUserId: grant.grantor_user_id,
+      before: { status: grant.status },
+      after: { status: 'rejected' },
+      occurredAt: now,
+    });
+    return grantDto(loadGrant(db, grant.id));
+  })();
+}
+
+export function updateShareGrant(
+  db: Database.Database,
+  input: BatchShareOptions & {
+    grantId: string;
+    actorUserId: string;
+    includePersonal?: boolean;
+    includeOwned?: boolean;
+    includeEditor?: boolean;
+    canJoinAs?: ShareJoinRole;
+    expiresAt?: string | null;
+    requestId: string;
+    mutationId: string;
+  },
+): AccountShareGrantDto {
+  expireShareGrants(db);
+  return db.transaction(() => {
+    const grant = loadGrant(db, input.grantId);
+    if (grant.grantor_user_id !== input.actorUserId) {
+      throw new AppError(403, 'FORBIDDEN', 'Only the grantor can update');
+    }
+    if (grant.status !== 'accepted' && grant.status !== 'pending') {
+      throw new AppError(409, 'ACCOUNT_SHARE_PENDING_EXISTS', 'Share grant is not accepted');
+    }
+    const next = parseShareScope({
+      includePersonal: input.includePersonal ?? grant.include_personal === 1,
+      includeOwned: input.includeOwned ?? grant.include_owned === 1,
+      includeEditor: input.includeEditor ?? grant.include_editor === 1,
+      canJoinAs: input.canJoinAs ?? grant.can_join_as,
+    });
+    const batch = resolveBatchShareOptions(db, input.actorUserId, input, grant);
+    if ((batch.canEditLogs || batch.canDeleteLogs) && next.includeEditor) {
+      throw new AppError(422, 'VALIDATION_FAILED', 'You cannot grant write access to another owner’s sessions');
+    }
+    if (batch.selectedSessions.some(row => row.source === 'personal' ? !next.includePersonal : !next.includeOwned)) {
+      throw new AppError(422, 'VALIDATION_FAILED', 'Selection contains a disabled source');
+    }
+    const expiresAt = input.expiresAt === undefined ? grant.expires_at : normalizedFutureExpiry(input.expiresAt);
+    const now = nowIso();
+    db.prepare(`
+      UPDATE account_share_grants
+      SET include_personal = ?, include_owned = ?, include_editor = ?,
+          can_join_as = ?, expires_at = ?, updated_at = ?, scope_mode = ?,
+          selected_sessions_json = ?, can_edit_logs = ?, can_delete_logs = ?, personal_edit_requires_collaboration = ?
+      WHERE id = ?
+    `).run(
+      next.includePersonal ? 1 : 0,
+      next.includeOwned ? 1 : 0,
+      next.includeEditor ? 1 : 0,
+      next.canJoinAs,
+      expiresAt,
+      now,
+      batch.scopeMode,
+      JSON.stringify(batch.selectedSessions),
+      Number(batch.canEditLogs),
+      Number(batch.canDeleteLogs),
+      Number(batch.requireCollaborationForPersonalEdits),
+      grant.id,
+    );
+    // Old account shares could create memberships with broader capabilities.
+    // A narrowed grant must not leave those memberships as an authorization
+    // bypass. Independently invited memberships are deliberately untouched.
+    const updated = loadGrant(db, grant.id);
+    if (grant.status === 'accepted') {
+      revokeShareMemberships(db, grant, input, (sessionId, role) =>
+        updated.include_owned === 1 && (updated.can_join_as === 'editor' || (updated.can_join_as === 'viewer' && role === 'viewer')) &&
+        grantSelectsSession(updated, 'collaboration', sessionId) &&
+        Boolean(db.prepare('SELECT 1 FROM sessions WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(sessionId, updated.grantor_user_id)));
+    }
+    appendAccountShareAudit(db, {
+      action: 'account_share.updated',
+      actorUserId: input.actorUserId,
+      requestId: input.requestId,
+      mutationId: input.mutationId,
+      grantId: grant.id,
+      targetUserId: grant.grantee_user_id,
+      before: grantDto(grant) as unknown as Record<string, unknown>,
+      after: { ...next, ...batch, expiresAt },
+      occurredAt: now,
+    });
+    return grantDto(loadGrant(db, grant.id));
+  })();
+}
+
+export function cancelShareRequest(
+  db: Database.Database,
+  input: {
+    grantId: string;
+    actorUserId: string;
+    requestId: string;
+    mutationId: string;
+  },
+): AccountShareGrantDto {
+  return db.transaction(() => {
+    const grant = loadGrant(db, input.grantId);
+    if (grant.grantor_user_id !== input.actorUserId) {
+      throw new AppError(403, 'FORBIDDEN', 'Only the grantor can cancel');
+    }
+    if (grant.status !== 'pending') {
+      throw new AppError(409, 'ACCOUNT_SHARE_PENDING_EXISTS', 'Share request is not pending');
+    }
+    return markGrantCancelled(db, grant, input);
+  })();
+}
+
+function markGrantCancelled(
+  db: Database.Database,
+  grant: AccountShareGrantRow,
+  input: { actorUserId: string; requestId: string; mutationId: string },
+): AccountShareGrantDto {
+  const now = nowIso();
+  db.prepare(`
+    UPDATE account_share_grants
+    SET status = 'cancelled', updated_at = ?
+    WHERE id = ? AND status = 'pending'
+  `).run(now, grant.id);
+  appendAccountShareAudit(db, {
+    action: 'account_share.cancelled',
+    actorUserId: input.actorUserId,
+    requestId: input.requestId,
+    mutationId: input.mutationId,
+    grantId: grant.id,
+    targetUserId: grant.grantor_user_id === input.actorUserId
+      ? grant.grantee_user_id
+      : grant.grantor_user_id,
+    before: { status: grant.status },
+    after: { status: 'cancelled' },
+    occurredAt: now,
+  });
+  return grantDto(loadGrant(db, grant.id));
+}
+
+export function listShareGrants(
+  db: Database.Database,
+  actorUserId: string,
+  box: 'inbox' | 'outbox' | 'active',
+): AccountShareGrantDto[] {
+  expireShareGrants(db);
+  const rows = db.prepare(`
+    SELECT g.*, owner.username AS grantor_username, recipient.username AS grantee_username
+    FROM account_share_grants g
+    JOIN users owner ON owner.id = g.grantor_user_id
+    JOIN users recipient ON recipient.id = g.grantee_user_id
+    WHERE
+      CASE ?
+        WHEN 'inbox' THEN grantee_user_id = ? AND status = 'pending'
+        WHEN 'outbox' THEN grantor_user_id = ? AND status = 'pending'
+        ELSE (
+          (grantor_user_id = ? OR grantee_user_id = ?) AND status = 'accepted'
+        )
+      END
+    ORDER BY g.updated_at DESC, g.id DESC
+  `).all(box, actorUserId, actorUserId, actorUserId, actorUserId) as Array<AccountShareGrantRow & { grantor_username: string; grantee_username: string }>;
+  return rows.map(row => ({ ...grantDto(row), grantorUsername: row.grantor_username, granteeUsername: row.grantee_username }));
+}
+
+export function blockAccountShare(
+  db: Database.Database,
+  input: {
+    actorUserId: string;
+    username: string;
+    requestId: string;
+    mutationId: string;
+  },
+): { blockedUserId: string } {
+  return db.transaction(() => {
+    const target = findActiveUserByUsername(db, input.username);
+    if (!target) {
+      throw new AppError(404, 'ACCOUNT_SHARE_USER_NOT_FOUND', 'Share target was not found');
+    }
+    if (target.id === input.actorUserId) {
+      throw new AppError(400, 'ACCOUNT_SHARE_SELF', 'An account cannot block itself');
+    }
+    const now = nowIso();
+    db.prepare(`
+      INSERT OR IGNORE INTO account_share_blocks (blocker_user_id, blocked_user_id, created_at)
+      VALUES (?, ?, ?)
+    `).run(input.actorUserId, target.id, now);
+    const inbound = db.prepare(`
+      SELECT * FROM account_share_grants
+      WHERE grantor_user_id = ? AND grantee_user_id = ? AND status IN ('pending', 'accepted')
+    `).all(target.id, input.actorUserId) as AccountShareGrantRow[];
+    for (const grant of inbound) {
+      if (grant.status === 'pending') {
+        markGrantCancelled(db, grant, {
+          actorUserId: input.actorUserId,
+          requestId: input.requestId,
+          mutationId: `${input.mutationId}:${grant.id}`,
+        });
+      } else {
+        revokeAcceptedGrant(db, grant, {
+          actorUserId: input.actorUserId,
+          requestId: input.requestId,
+          mutationId: `${input.mutationId}:${grant.id}`,
+        });
+      }
+    }
+    appendAccountShareAudit(db, {
+      action: 'account_share.blocked',
+      actorUserId: input.actorUserId,
+      requestId: input.requestId,
+      mutationId: input.mutationId,
+      targetUserId: target.id,
+      after: { blockedUserId: target.id },
+      occurredAt: now,
+    });
+    return { blockedUserId: target.id };
+  })();
+}
+
+export function unblockAccountShare(
+  db: Database.Database,
+  input: {
+    actorUserId: string;
+    username: string;
+    requestId: string;
+    mutationId: string;
+  },
+): { blockedUserId: string } {
+  return db.transaction(() => {
+    const target = findActiveUserByUsername(db, input.username);
+    if (!target) {
+      throw new AppError(404, 'ACCOUNT_SHARE_USER_NOT_FOUND', 'Share target was not found');
+    }
+    db.prepare(`
+      DELETE FROM account_share_blocks
+      WHERE blocker_user_id = ? AND blocked_user_id = ?
+    `).run(input.actorUserId, target.id);
+    appendAccountShareAudit(db, {
+      action: 'account_share.unblocked',
+      actorUserId: input.actorUserId,
+      requestId: input.requestId,
+      mutationId: input.mutationId,
+      targetUserId: target.id,
+      after: { blockedUserId: target.id },
+      occurredAt: nowIso(),
+    });
+    return { blockedUserId: target.id };
+  })();
+}
+
+export function listAccountShareBlocks(
+  db: Database.Database,
+  actorUserId: string,
+): Array<{ blockedUserId: string; username: string; createdAt: string }> {
+  return db.prepare(`
+    SELECT b.blocked_user_id AS blockedUserId, u.username, b.created_at AS createdAt
+    FROM account_share_blocks b
+    JOIN users u ON u.id = b.blocked_user_id
+    WHERE b.blocker_user_id = ?
+    ORDER BY b.created_at DESC, b.blocked_user_id
+  `).all(actorUserId) as Array<{ blockedUserId: string; username: string; createdAt: string }>;
+}

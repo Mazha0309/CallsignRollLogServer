@@ -55,7 +55,58 @@ export interface SessionSummary {
   logCount?: number;
 }
 
-export type AccountSessionSource = 'collaboration' | 'personal';
+export type AccountSessionSource = 'collaboration' | 'personal' | 'shared';
+export type ShareJoinRole = 'editor' | 'viewer' | 'none';
+export type ShareGrantStatus = 'pending' | 'accepted' | 'rejected' | 'cancelled' | 'revoked' | 'expired';
+export interface ShareSelection { source: 'personal' | 'collaboration'; sessionId: string }
+export interface SessionShareOptions {
+  scopeMode: 'all' | 'selected'; selectedSessions: ShareSelection[];
+  canEditLogs: boolean; canDeleteLogs: boolean;
+}
+
+export interface AccountShareGrant {
+  id: string;
+  grantorUserId: string;
+  granteeUserId: string;
+  status: ShareGrantStatus;
+  includePersonal: boolean;
+  includeOwned: boolean;
+  includeEditor: boolean;
+  canJoinAs: ShareJoinRole;
+  createdAt: string;
+  updatedAt: string;
+  respondedAt: string | null;
+  revokedAt: string | null;
+  expiresAt: string | null;
+  scopeMode?: 'all' | 'selected';
+  selectedSessions?: ShareSelection[];
+  canEditLogs?: boolean;
+  canDeleteLogs?: boolean;
+  grantorUsername?: string;
+  granteeUsername?: string;
+}
+
+export interface SharedSessionSummary {
+  canEditLogs?: boolean;
+  canDeleteLogs?: boolean;
+  snapshotRevision?: number | null;
+  source: 'personal' | 'collaboration';
+  sessionId: string;
+  title: string;
+  status: string;
+  visibility: 'shared';
+  grantId: string;
+  grantorUserId: string;
+  grantorUsername: string;
+  grantorRole: SessionRole | null;
+  canJoin: boolean;
+  joinRole: Exclude<ShareJoinRole, 'none'> | null;
+  logCount: number;
+  createdAt: string;
+  updatedAt: string;
+  closedAt: string | null;
+  deletedAt: string | null;
+}
 
 export interface AccountSessionSummary {
   source: AccountSessionSource;
@@ -71,6 +122,8 @@ export interface AccountSessionSummary {
   closedAt: string | null;
   deletedAt: string | null;
   snapshotRevision: number | null;
+  sharedSource?: 'personal' | 'collaboration';
+  grantId?: string;
 }
 
 export interface PersonalSessionDetails {
@@ -304,7 +357,7 @@ export interface PublicArchiveSession {
   id: string;
   listId: string;
   sourceUserId: string;
-  sourceKind: AccountSessionSource;
+  sourceKind: 'personal' | 'collaboration';
   sourceSessionId: string;
   title: string;
   closedAt: string;
@@ -313,7 +366,8 @@ export interface PublicArchiveSession {
   snapshotAt: string;
 }
 
-export interface AvailableArchiveSourceSession extends Omit<AccountSessionSummary, 'status'> {
+export interface AvailableArchiveSourceSession extends Omit<AccountSessionSummary, 'status' | 'source'> {
+  source: 'personal' | 'collaboration';
   status: 'closed';
 }
 
@@ -518,6 +572,7 @@ export interface ServerInfo {
   version?: string;
   protocolVersion?: number;
   registrationEnabled?: boolean;
+  features?: string[];
   capabilities?: Record<string, boolean>;
 }
 

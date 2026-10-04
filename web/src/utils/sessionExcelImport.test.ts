@@ -8,7 +8,7 @@ const log = (overrides: Partial<LogRecord> = {}): LogRecord => ({
   sessionId: 'session-1',
   version: 1,
   time: '20:03:47',
-  controller: 'BG5CTRL',
+  controller: 'BG5CRL',
   callsign: 'BG5CRL',
   rstSent: '59',
   rstRcvd: '57',
@@ -46,7 +46,7 @@ describe('session Excel import parser', () => {
     expect(parsed.sheets[0].rows).toEqual(expect.arrayContaining([
       { rowNumber: 1, cells: ['周末点名'] },
       { rowNumber: 2, cells: ['#', '时间', '呼号', 'RST发', 'RST收', 'QTH', '设备', '功率', '天线', '高度', '备注'] },
-      { rowNumber: 3, cells: ['点名主控:', '20:02', 'BG5CTRL'] },
+      { rowNumber: 3, cells: ['点名主控:', '20:02', 'BG5CRL'] },
       { rowNumber: 4, cells: ['1', '20:03', 'BG5CRL', '59', '57', '浙江杭州', 'IC-705', '5W', '八木天线', '5楼', '已人工修正'] },
       { rowNumber: 5, cells: ['2', '20:04', 'BG5TWO', '59', '57', '浙江杭州', 'IC-705', '5W', '八木天线', '5楼', '已人工修正'] },
     ]));

@@ -57,6 +57,13 @@ button, input, textarea, select { font: inherit; }
 .surface { border-color: var(--app-border) !important; box-shadow: 0 1px 2px rgb(0 0 0 / 3%); }
 .surface > .ant-card-head .ant-card-head-title { min-width: 0; white-space: normal; }
 .surface .ant-descriptions-item-content { min-width: 0; overflow-wrap: anywhere; }
+.social-workspace { display: grid; gap: 16px; }
+.social-search-input { width: min(460px, 100%); }
+.social-search-results:not(:empty) { margin-top: 16px; }
+.social-list .ant-list-item { gap: 12px; flex-wrap: wrap; }
+.social-list .ant-list-item-meta { min-width: min(180px, 100%); }
+.social-list .ant-list-item-meta-title { overflow-wrap: anywhere; }
+.social-list .ant-list-item-action { margin-inline-start: 0; }
 .table-card .ant-card-body { padding: 0; }
 .table-card .ant-table-wrapper { overflow: hidden; }
 .table-card .ant-table-cell { white-space: nowrap; }

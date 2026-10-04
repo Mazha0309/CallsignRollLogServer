@@ -4,13 +4,17 @@ import cors from 'cors';
 import express, { Express } from 'express';
 import helmet from 'helmet';
 import path from 'path';
+import { existsSync, readFileSync } from 'fs';
 import { createAdminV1Router } from './api/admin-v1';
 import { createAdminPersonalSnapshotsV1Router } from './api/admin-personal-snapshots-v1';
 import { createAdminPersonalDictionarySnapshotsV1Router } from './api/admin-personal-dictionary-snapshots-v1';
 import { createAdminGovernanceV1Router } from './api/admin-governance-v1';
+import { createAdminDatabaseRecoveryRouter } from './api/admin-database-recovery-v1';
 import { createAuthV1Router } from './api/auth-v1';
 import { createWebAuthV1Router } from './api/web-auth-v1';
 import { createAccountV1Router } from './api/account-v1';
+import { createAccountSessionSharesV1Router } from './api/account-session-shares-v1';
+import { createSocialV1Router } from './api/social-v1';
 import { createPersonalSnapshotV1Router } from './api/personal-snapshot-v1';
 import { createPersonalDictionarySnapshotV1Router } from './api/personal-dictionary-snapshot-v1';
 import { createExcelExportSettingsV1Router } from './api/excel-export-settings-v1';
@@ -21,6 +25,7 @@ import { createCollaborationSyncV1Router } from './api/collaboration-sync-v1';
 import { createServerInfoRouter } from './api/server-info';
 import { createSessionMembershipV1Router } from './api/session-members-v1';
 import { createSessionsV1Router } from './api/sessions-v1';
+import { createSessionJoinShareV1Router } from './api/session-join-share-v1';
 import { createSessionEventRetentionV1Router } from './api/session-event-retention-v1';
 import { createLiveDraftV1Router } from './api/live-draft-v1';
 import { createPublicArchiveListsV1Router } from './api/public-archive-lists-v1';
@@ -41,6 +46,8 @@ import { requestIdMiddleware } from './middleware/request-id';
 import { getRuntimeMetrics } from './operations/metrics';
 
 export interface CreateAppOptions {
+  onRestoreQueued?: () => void;
+  clientDirectory?: string;
   db?: Database.Database;
   config?: Partial<AppConfig>;
   baseConfig?: AppConfig;
@@ -107,14 +114,20 @@ export function createApp(options: CreateAppOptions = {}): Express {
     },
   );
   app.use(express.json({ limit: runtimeConfig.jsonBodyLimit }));
+  app.use('/api/v1/admin/database-recovery', createAdminDatabaseRecoveryRouter({ db, config: runtimeConfig, onRestoreQueued: options.onRestoreQueued }));
 
   app.use(
     '/api/v1/server-info',
     createServerInfoRouter({ db, config: runtimeConfig }),
   );
   app.use('/api/v1/auth', createAuthV1Router({ db, config: runtimeConfig }));
+  app.use('/api/v1/social', createSocialV1Router({ db, config: runtimeConfig }));
   app.use('/api/v1/web-auth', createWebAuthV1Router({ db, config: runtimeConfig }));
   app.use('/api/v1/account', createAccountV1Router({ db, config: runtimeConfig }));
+  app.use(
+    '/api/v1/account',
+    createAccountSessionSharesV1Router({ db, config: runtimeConfig }),
+  );
   app.use(
     '/api/v1/account',
     createPersonalSnapshotV1Router({ db, config: runtimeConfig }),
@@ -149,6 +162,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
     createAdminGovernanceV1Router({ db, config: runtimeConfig }),
   );
   app.use('/api/v1/sessions', createSessionsV1Router({ db, config: runtimeConfig }));
+  app.use('/api/v1/sessions', createSessionJoinShareV1Router({ db, config: runtimeConfig }));
   app.use(
     '/api/v1/sessions',
     createExcelCorrectionsV1Router({ db, config: runtimeConfig }),
@@ -190,6 +204,27 @@ export function createApp(options: CreateAppOptions = {}): Express {
 
   const liveDist = path.join(__dirname, '../live/dist');
   const webDist = path.join(__dirname, '../web/dist');
+  const clientDist = options.clientDirectory ?? process.env.WEB_CLIENT_DIR ?? path.join(__dirname, '../web-client');
+  if (existsSync(path.join(clientDist, 'index.html'))) {
+    const index = readFileSync(path.join(clientDist, 'index.html'), 'utf8')
+      .replace(/<base href="[^"]*"\s*\/?\s*>/, '<base href="/client/">');
+    app.get(/^\/client$/, (_req, res) => { res.redirect(302, '/client/'); });
+    app.use('/client', (_req, res, next) => {
+      res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+      res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
+      next();
+    });
+    app.get('/client/index.html', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      res.type('html').send(index);
+    });
+    app.use('/client', express.static(clientDist, { index: false }));
+    app.get('/client/*', (req, res, next) => {
+      if (path.extname(req.path)) return next();
+      res.setHeader('Cache-Control', 'no-store');
+      res.type('html').send(index);
+    });
+  }
   app.use('/live', express.static(liveDist, { index: false }));
   app.get(['/live/:publicShareId', '/live/:publicShareId/*'], (_req, res) => {
     res.sendFile(path.join(liveDist, 'index.html'));
@@ -215,6 +250,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
       '/login',
       '/register',
       '/bootstrap',
+      '/connect',
       '/app',
       '/app/*',
       '/admin',

@@ -43,7 +43,7 @@ test('two-hour sweep closes only strictly inactive Sessions and broadcasts the c
       INSERT INTO logs (
         sync_id, session_id, version, time, controller, callsign,
         created_at, updated_at, created_by, updated_by
-      ) VALUES ('recent-log', 'legacy-log-activity', 1, ?, 'BG5CTRL',
+      ) VALUES ('recent-log', 'legacy-log-activity', 1, ?, 'BG5CRL',
                 'BG5LOG', ?, ?, ?, ?)
     `).run(
       '2026-08-16T10:30:00.000Z',

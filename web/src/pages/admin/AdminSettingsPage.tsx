@@ -8,6 +8,7 @@ import { useAsync } from '../../hooks/useAsync';
 import { useI18n } from '../../useI18n';
 
 interface OperationalForm {
+  webClientUrl: string;
   corsOrigins: string;
   accessTokenTtlSeconds: number;
   refreshTokenTtlSeconds: number;
@@ -36,6 +37,7 @@ export default function AdminSettingsPage() {
   const [registrationSaving, setRegistrationSaving] = useState(false);
   const effective = operational.data?.desired ?? {};
   const initial: OperationalForm = {
+    webClientUrl: String(effective.webClientUrl ?? ''),
     corsOrigins: Array.isArray(effective.corsOrigins) ? effective.corsOrigins.join('\n') : '',
     accessTokenTtlSeconds: Number(effective.accessTokenTtlSeconds ?? 900),
     refreshTokenTtlSeconds: Number(effective.refreshTokenTtlSeconds ?? 2_592_000),
@@ -98,6 +100,9 @@ export default function AdminSettingsPage() {
       <Card className="surface" title={t('admin.settings')}>
         <AsyncContent loading={operational.loading} error={operational.error} onRetry={operational.reload}>
           {operational.data && <Form<OperationalForm> layout="vertical" initialValues={initial} onFinish={setPending}>
+            <Form.Item name="webClientUrl" label={t('connect.clientUrl')} extra={t('connect.clientUrlHint')}>
+              <Input placeholder="https://log.example.com/" />
+            </Form.Item>
             {operational.data.restartRequired && <Alert type="warning" showIcon message={t('settings.restartRequired', { keys: operational.data.restartRequiredKeys.join(', ') })} style={{ marginBottom: 16 }} />}
             <Form.Item name="corsOrigins" label="CORS origins"><Input.TextArea rows={3} placeholder="https://example.com" /></Form.Item>
             <div className="content-grid"><Form.Item name="accessTokenTtlSeconds" label="Access token TTL (s)" rules={[{ required: true }]}><InputNumber min={60} style={{ width: '100%' }} /></Form.Item><Form.Item name="refreshTokenTtlSeconds" label="Refresh token TTL (s)" rules={[{ required: true }]}><InputNumber min={60} style={{ width: '100%' }} /></Form.Item></div>

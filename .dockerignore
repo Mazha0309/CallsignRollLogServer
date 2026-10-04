@@ -9,3 +9,6 @@ web/node_modules
 live/dist
 live/node_modules
 npm-debug.log*
+web-client
+web-client.backup-*
+.web-client-stage-*

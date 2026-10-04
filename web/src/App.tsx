@@ -15,6 +15,10 @@ const SessionsPage = lazy(() => import('./pages/app/SessionsPage'));
 const SessionDetailPage = lazy(() => import('./pages/app/SessionDetailPage'));
 const PersonalSessionDetailPage = lazy(() => import('./pages/app/PersonalSessionDetailPage'));
 const AccountPage = lazy(() => import('./pages/app/AccountPage'));
+const ConnectPage = lazy(() => import('./pages/ConnectPage'));
+const SharingPage = lazy(() => import('./pages/app/SharingPage'));
+const FriendsPage = lazy(() => import('./pages/app/FriendsPage'));
+const SharedSessionDetailPage = lazy(() => import('./pages/app/SharedSessionDetailPage'));
 const PersonalCloudPage = lazy(() => import('./pages/app/PersonalCloudPage'));
 const PublicArchiveListsPage = lazy(() => import('./pages/app/PublicArchiveListsPage'));
 const PublicArchiveListDetailPage = lazy(() => import('./pages/app/PublicArchiveListDetailPage'));
@@ -26,6 +30,7 @@ const AdminSessionDetailPage = lazy(() => import('./pages/admin/AdminSessionDeta
 const AdminPersonalSessionDetailPage = lazy(() => import('./pages/admin/AdminPersonalSessionDetailPage'));
 const AdminAuditPage = lazy(() => import('./pages/admin/AdminAuditPage'));
 const OperationsPage = lazy(() => import('./pages/admin/OperationsPage'));
+const BackupsPage = lazy(() => import('./pages/admin/BackupsPage'));
 const PublicLiveshareDetailPage = lazy(() => import('./pages/admin/PublicLiveshareDetailPage'));
 const AdminSettingsPage = lazy(() => import('./pages/admin/AdminSettingsPage'));
 const AdminPersonalSnapshotsPage = lazy(() => import('./pages/admin/AdminPersonalSnapshotsPage'));
@@ -58,6 +63,7 @@ function AppRoutes() {
     <Route path="/login" element={<AuthPage mode="login" />} />
     <Route path="/register" element={<AuthPage mode="register" />} />
     <Route path="/bootstrap" element={<AuthPage mode="bootstrap" />} />
+    <Route path="/connect" element={<ConnectPage />} />
     <Route element={<ProtectedRoute />}>
       <Route path="/app" element={<AppShell />}>
         <Route index element={<OverviewPage />} />
@@ -65,6 +71,10 @@ function AppRoutes() {
         <Route path="sessions/collaboration/:sessionId" element={<SessionDetailPage />} />
         <Route path="sessions/personal/:sessionId" element={<PersonalSessionDetailPage />} />
         <Route path="sessions/:sessionId" element={<SessionDetailPage />} />
+        <Route path="sessions/shared/:source/:sessionId" element={<SharedSessionDetailPage />} />
+        <Route path="friends" element={<FriendsPage />} />
+        <Route path="sharing" element={<Navigate to="/app/friends" replace />} />
+        <Route path="legacy-sharing" element={<SharingPage />} />
         <Route path="personal-cloud" element={<PersonalCloudPage />} />
         <Route path="public-archives" element={<PublicArchiveListsPage />} />
         <Route path="public-archives/:listId" element={<PublicArchiveListDetailPage />} />
@@ -84,6 +94,7 @@ function AppRoutes() {
           <Route path="public-archives" element={<AdminPublicArchiveListsPage />} />
           <Route path="audit" element={<AdminAuditPage />} />
           <Route path="operations" element={<OperationsPage />} />
+          <Route path="backups" element={<BackupsPage />} />
           <Route path="operations/liveshares/:publicShareId" element={<PublicLiveshareDetailPage />} />
           <Route path="settings" element={<AdminSettingsPage />} />
         </Route>

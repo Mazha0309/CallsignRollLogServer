@@ -58,7 +58,7 @@ function workbook(): WorkbookInput {
       rows: [
         { rowNumber: 1, cells: ['2026-08-24 点名记录'] },
         { rowNumber: 2, cells: ['#', '时间', '呼号', 'RST发', 'RST收', 'QTH', '设备'] },
-        { rowNumber: 3, cells: ['点名主控:', '20:00', 'BG5CTRL'] },
+        { rowNumber: 3, cells: ['点名主控:', '20:00', 'BG5CRL'] },
         { rowNumber: 4, cells: ['1', '20:01', 'BG5NEW', '59', '57', '', 'IC-705'] },
       ],
     }],
@@ -71,7 +71,7 @@ function logRow(): any {
     session_id: SESSION_ID,
     version: 1,
     time: '2026-08-24T12:01:37.000Z',
-    controller: 'BG5CTRL',
+    controller: 'BG5CRL',
     callsign: 'BG5OLD',
     rst_sent: '55',
     rst_rcvd: '59',
@@ -97,7 +97,7 @@ function llmRecord(): Record<string, unknown> {
       presentFields: ['time', 'controller', 'callsign', 'rstSent', 'rstRcvd', 'qth', 'device'],
       values: {
         time: '20:01',
-        controller: 'BG5CTRL',
+        controller: 'BG5CRL',
         callsign: 'bg5new',
         rstSent: '59',
         rstRcvd: '57',

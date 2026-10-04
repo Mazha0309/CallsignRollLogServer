@@ -1,6 +1,7 @@
 # OpenLogTool Server
 
-OpenLogTool 配套服务端，提供用户认证、Session/日志持久化、管理后台，以及协作 v1 的发布、成员和实时事件协议。
+OpenLogTool 的可选配套服务端，提供用户认证、Session/日志持久化、管理后台，以及协作 v1 的发布、成员和实时事件协议。
+客户端的本地记录、词库、历史和导入导出不依赖服务器或账号；只在需要云同步、好友及多人协作时部署本项目。
 
 完整协作协议见 [Session 协作 v1 设计](docs/superpowers/specs/2026-07-11-collaboration-v1-design.md)。
 当前专项 API 文档采用“主题 + `api-v1`”的 kebab-case 文件名：
@@ -10,6 +11,19 @@ OpenLogTool 配套服务端，提供用户认证、Session/日志持久化、管
 - [Account Excel Export Settings API v1](docs/account-excel-export-settings-api-v1.md)
 - [Public Live Share Statistics API v1](docs/public-liveshare-statistics-api-v1.md)
 - [Public Archive Lists API v1](docs/public-archive-lists-api-v1.md)
+- [Account Session Sharing API v1](docs/account-session-sharing-api-v1.md)
+- [好友、会话邀请与申请 API v1](docs/friends-collaboration-api-v1.md)
+
+新版共享入口为“好友与协作”：添加好友、处理消息、邀请或申请加入会话。
+好友不会自动获得个人云及历史记录权限；会话默认私有，可由所有者开启好友发现。
+服务端声明 `friendCollaboration` 能力，旧 `accountSessionSharing` 保留兼容。
+
+声明 `socialWebSocket` 的服务器提供账号级 `/ws/social` 通知通道，好友请求、会话邀请及申请
+变化会通知相关账号，无需先成为会话成员。客户端和门户好友页不再定时轮询；首次连接与重连
+都会获取最新列表。连接使用已登录 API 签发的一次性短期票据，不在 URL 中携带登录 token。
+反向代理需允许 `/ws/social` 的 WebSocket Upgrade（与现有 `/ws/` 通道一并转发）。
+
+服务端不再因会话闲置而自动结束共同记录或清除其草稿；结束由发起人明确操作，断线不等于结束。
 
 ## 技术栈
 
@@ -52,6 +66,34 @@ PUBLIC_SHARE_HMAC_KEY=<至少 32 字节的独立随机值>
 登录成员门户或管理后台。若代理终止 TLS，按实际代理层级配置 `TRUST_PROXY`。
 
 ## 安装与启动
+
+### 统一客户端入口（可选）
+
+服务端可同时提供 Flutter WebClient，无需另起一个站点或填写第二套服务器地址。
+在有 Flutter/Rust Web 构建环境的机器上构建客户端，然后将产物交给服务端安装脚本：
+
+~~~bash
+cd ../openlogtool
+bash tool/build_web.sh --base-href /client/
+cd ../OpenLogToolServer
+node scripts/install-web-client.mjs ../openlogtool/build/web
+~~~
+
+安装脚本校验必需文件，保留旧产物为 `web-client.backup-<时间>` 后切换新目录，不改数据库。
+Node 服务默认读取 `./web-client`，也可用 `WEB_CLIENT_DIR` 指定绝对路径；Compose 已将
+`./web-client` 只读挂载到容器。安装或替换产物后重启 Node，或执行
+`docker compose up -d --force-recreate server` 重新挂载目录。
+
+- `/connect`：连接说明、可复制地址和二维码；只有检测到客户端产物时才显示客户端按钮。
+- `/client/`：记录客户端，首次配置默认使用当前站点的服务器地址，保留用户已有配置。
+- `/app/friends`：成员门户的好友入口，和客户端操作同一套好友/邀请/申请数据。
+- `/admin`：管理员后台，仍与普通成员操作分开。
+
+桌面/手机客户端可直接在“服务器与账号”粘贴 `/connect`、`/client/` 或门户链接，
+自动提取服务器地址后正常登录。二维码不含账号密码或 token，不会自动把门户登录态交给客户端。
+WebClient 的 Rust 共享内存要求 HTTPS（或浏览器认可的 localhost）以及服务端已设置的
+COOP/COEP 响应头；反向代理需保留这些头，并将 `/client/` 与 `/connect` 同样转发到服务端。
+没有 WebClient 产物时，原来的 API、成员门户和管理后台不受影响。
 
 ### Docker 首次安装
 
@@ -248,7 +290,11 @@ curl -X POST http://127.0.0.1:3000/api/v1/auth/bootstrap \
 | GET | `/api/v1/admin/governance-audit-events` | 分页查询敏感读取与治理审计 |
 | GET/PATCH | `/api/v1/admin/operational-settings` | 读取/修改可编辑运行参数，并明确返回是否需重启 |
 | POST | `/api/v1/admin/sessions/:id/export` | 审计后下载 CSV 或 JSON |
-| POST | `/api/v1/admin/database-backup` | 审计后在线生成并下载 SQLite 备份；恢复仅允许离线 CLI 流程 |
+| POST | `/api/v1/admin/database-backup` | 审计后在线生成并下载一致性 SQLite 备份 |
+| GET | `/api/v1/admin/database-recovery` | 管理员查看恢复能力与最近结果 |
+| POST | `/api/v1/admin/database-recovery/preview` | 重新认证后上传 SQLite 文件校验，不修改当前数据 |
+| POST | `/api/v1/admin/database-recovery/confirm` | 二次确认恢复任务，重启期间先自动备份再以事务替换数据 |
+| POST | `/api/v1/admin/database-recovery/safety-backup` | 重新认证并填写原因，下载最近一次恢复前自动备份 |
 | GET/PUT | `/api/v1/sessions`、`/api/v1/sessions/:id` | 成员 Session 列表与幂等发布初始化 |
 | GET | `/api/v1/sessions/catalog` | 当前成员可访问 Session 的分页目录 |
 | GET | `/api/v1/sessions/:id/logs` | 当前成员的分页日志；返回逐条 `ownedByCurrentUser`/`canMutate` |
@@ -341,6 +387,24 @@ Access token 默认 15 分钟有效，refresh token 默认 30 天有效并在刷
 
 管理员“运行与维护”页面每 10 秒在前台可见时刷新，展示服务进程 CPU/RSS/堆内存、Node 可见的运行环境 CPU/内存与负载、可用时的 cgroup v2 内存、请求错误和成员/公开连接，并列出逐 Live Share 的当前连接和累计有效打开；进入单分享详情后还会显示访客最近可信请求 IP、首末访问时间及当前在线提示。进程计数和当前连接在服务重启后归零；累计打开保存在当前数据库。容器和宿主资源边界会随部署运行时而异，页面会明确标注统计范围，不会把它描述为跨实例监控。
 
+## 备份与恢复
+
+管理员入口：`/admin/backups`（侧边栏“备份与恢复”）。在线备份包含整个数据库，
+**不包含 `.env`、部署文件或客户端本机数据**。备份含密码哈希等敏感信息，须安全保存。
+
+网页恢复仅支持本服务器及其此前恢复实例的**同结构** SQLite 文件（最大 64 MiB）；
+旧版本、跨服务器迁移或更大文件请停服后采用对应版本的离线恢复流程，不要直接替换运行中的数据库。
+上传后展示数量、结构版本与 SHA-256，预览 15 分钟有效，绑定管理员登录会话；
+再次验证密码、填写原因并输入 `RESTORE` 才能确认。原数据在确认后仍不会被在线替换。
+服务停止后，下次启动在 HTTP/WS 监听前执行恢复。默认 Docker `restart: unless-stopped`
+会自动拉起；原生进程需由管理员或进程管理器重新启动。
+
+恢复前自动备份位于数据库同目录 `.database-recovery/before-<任务ID>.sqlite3`。
+替换所有数据及完成审计在同一 SQLite 事务中提交，失败回滚，重复启动不会重复执行已完成任务。
+保留发起管理员的**当前密码**，用户名以校验预览为准；撤销所有登录会话并更换服务器实例 ID，
+客户端需重新登录、核对服务器连接，防止旧游标或待同步修改自动写回。结果可在备份恢复页查看。
+恢复文件与安全备份不会自动删除，请按自己的保留策略离线管理，不要删除待执行任务的文件。
+
 ## 数据库迁移
 
 迁移作为 TypeScript 模块编译进 `dist`，启动时按版本和 checksum 顺序执行，不依赖运行时复制 `schema.sql`。
@@ -388,7 +452,7 @@ npm run test:dist
 npm run verify
 ~~~
 
-`npm run verify` 会依次执行服务端 typecheck、全部 API/迁移测试、正式编译产物冒烟，以及 Web 门户和 Liveshare 的 lint、测试与生产构建。`test:dist` 会使用正式编译产物在临时目录创建数据库，验证迁移表、关键列、唯一索引、外键和 WAL。
+`npm run verify` 会依次执行服务端 typecheck、全部 API/迁移测试、正式编译产物冒烟，以及 Web 门户和 Liveshare 的 lint、测试与生产构建。`test:dist` 会使用正式编译产物在临时目录创建数据库，验证迁移表、关键列、唯一索引、外键和 WAL，并演练备份下载、上传校验、确认停服、重启恢复、令牌撤销和重新登录；不访问生产数据库。
 
 ## Excel AI 校对
 

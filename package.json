@@ -1,6 +1,6 @@
 {
   "name": "openlogtool-server",
-  "version": "0.11.2",
+  "version": "0.13.0",
   "private": true,
   "license": "AGPL-3.0-only",
   "engines": {
@@ -17,7 +17,7 @@
     "verify:live": "npm --prefix live run lint && npm --prefix live run build",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test --test-concurrency=1 test/*.test.ts",
-    "test:dist": "npm run build && node scripts/test-dist.mjs",
+    "test:dist": "npm run build && node scripts/test-dist.mjs && node scripts/test-recovery-dist.mjs",
     "verify": "npm run typecheck && npm run build:web && npm run build:live && npm test && npm run test:dist && npm run verify:web && npm run verify:live"
   },
   "dependencies": {

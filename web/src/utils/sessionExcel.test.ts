@@ -14,7 +14,7 @@ const log = (overrides: Partial<LogRecord> = {}): LogRecord => ({
   sessionId: 'session-1',
   version: 1,
   time: '20:03',
-  controller: 'BG5CTRL',
+  controller: 'BG5CRL',
   callsign: 'BG5CRL',
   rstSent: '59',
   rstRcvd: '57',
@@ -41,7 +41,7 @@ describe('session Excel export', () => {
         log(),
         log({ syncId: 'log-2', callsign: 'BG5TWO', time: '20:04' }),
         log({ syncId: 'log-3', controller: 'BG5NEXT', time: '20:11' }),
-        log({ syncId: 'log-4', controller: 'BG5CTRL', time: '20:21' }),
+        log({ syncId: 'log-4', controller: 'BG5CRL', time: '20:21' }),
       ],
     });
     const archive = unzipSync(bytes);

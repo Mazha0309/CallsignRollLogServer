@@ -19,6 +19,8 @@ import {
   validatePersonalSnapshot,
 } from '../personal-snapshot/model';
 import { rejectUnknownKeys, requireJsonObject } from '../utils/validation';
+import { getSocialRealtimeHub } from '../social/realtime';
+import { rejectPromotedPersonalSessions } from '../account-share/promotion';
 import {
   getPersonalSessionDetail,
   listAccountSessionCatalog,
@@ -182,6 +184,7 @@ function replaceSnapshot(
     const current = readSnapshotRow(db, userId);
     const currentRevision = current?.revision ?? 0;
     if (currentRevision !== expected) throw conflict(current, expected);
+    rejectPromotedPersonalSessions(db, userId, validated.snapshot);
     if (current?.checksum === validated.checksum) {
       return { row: current, replaced: false };
     }
@@ -430,6 +433,7 @@ export function createPersonalSnapshotV1Router(
           validated,
         );
         setRevisionEtag(res, result.row.revision);
+        if (result.replaced) getSocialRealtimeHub(database()).sharedCatalogChanged(req.auth!.userId);
         res.json({
           replaced: result.replaced,
           personalSnapshot: snapshotMetadata(result.row),
