@@ -10,6 +10,7 @@ import { AccountShareGrantRow, GrantorShareRole } from './model';
 import { sessionVisibleThroughGrant } from './access';
 import { expireShareGrants } from './service';
 import { grantSelectsSession } from './selection';
+import { promotedPersonalSessionIds } from './promotion';
 
 export interface SharedSessionItem {
   source: 'personal' | 'collaboration';
@@ -75,6 +76,7 @@ export function listSharedSessions(
 
   const items: SharedSessionItem[] = [];
   for (const grant of grants) {
+    const promoted = promotedPersonalSessionIds(db, grant.grantor_user_id);
     const scope = {
       includePersonal: grant.include_personal === 1,
       includeOwned: grant.include_owned === 1,
@@ -111,8 +113,8 @@ export function listSharedSessions(
             closedAt: session.closed_at,
             deletedAt: session.deleted_at,
             snapshotRevision,
-            canEditLogs: grant.can_edit_logs === 1 && session.status === 'active',
-            canDeleteLogs: grant.can_edit_logs === 1 && grant.can_delete_logs === 1 && session.status === 'active',
+            canEditLogs: grant.can_edit_logs === 1 && grant.personal_edit_requires_collaboration !== 1 && session.status === 'active',
+            canDeleteLogs: grant.can_edit_logs === 1 && grant.personal_edit_requires_collaboration !== 1 && grant.can_delete_logs === 1 && session.status === 'active',
           });
         }
       }
@@ -128,7 +130,7 @@ export function listSharedSessions(
       FROM sessions s
       INNER JOIN session_members sm ON sm.session_id = s.id
       INNER JOIN users owner ON owner.id = s.owner_user_id
-      WHERE sm.user_id = ? AND sm.removed_at IS NULL AND s.deleted_at IS NULL
+      WHERE sm.user_id = ? AND sm.removed_at IS NULL AND s.deleted_at IS NULL AND s.status != 'initializing'
     `).all(grant.grantor_user_id) as CollaborationRow[];
 
     for (const row of collaborationRows) {
@@ -136,9 +138,12 @@ export function listSharedSessions(
       // An independent viewer membership must not mask an explicit editable
       // share. Owner/editor memberships already grant all record operations.
       if (memberRole && (memberRole !== 'viewer' || grant.can_edit_logs !== 1)) continue;
-      if (!grantSelectsSession(grant, 'collaboration', row.session_id)) continue;
+      const personalAlias = row.owner_user_id === grant.grantor_user_id && promoted.has(row.session_id);
+      if (!grantSelectsSession(grant, 'collaboration', row.session_id) &&
+          !(personalAlias && grantSelectsSession(grant, 'personal', row.session_id))) continue;
       const visible = sessionVisibleThroughGrant({
         ...scope,
+        includeOwned: scope.includeOwned || (personalAlias && scope.includePersonal),
         source: 'collaboration',
         grantorRole: row.role,
       });

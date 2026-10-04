@@ -15,6 +15,7 @@ import {
 } from '../admin/elevation';
 import { appendGovernanceAudit, parseStoredObject } from '../admin/governance-audit';
 import { usernameIdentity } from '../auth/username-identity';
+import { validateWebClientUrl } from '../client-link';
 import {
   findSession,
   MembershipRow,
@@ -90,6 +91,7 @@ const MAX_EXPORT_LOGS = 1_000_000;
 const EXPORT_PAGE_SIZE = 512;
 const backupsInProgress = new WeakSet<Database.Database>();
 const EDITABLE_CONFIG_KEYS = [
+  'webClientUrl',
   'corsOrigins',
   'accessTokenTtlSeconds',
   'refreshTokenTtlSeconds',
@@ -206,6 +208,7 @@ function openExportSnapshot(source: Database.Database): ExportSnapshot {
 }
 
 function validateConfigValue(key: EditableConfigKey, value: unknown): unknown {
+  if (key === 'webClientUrl') return validateWebClientUrl(value);
   if (key === 'corsOrigins') {
     if (!Array.isArray(value) || value.length > 100 || value.some((item) => typeof item !== 'string')) {
       throw validationError('corsOrigins must be an array of strings');
@@ -333,6 +336,7 @@ function applicableConfigOverrides(
 
 function editableConfigSnapshot(value: AppConfig): Record<EditableConfigKey, unknown> {
   return {
+    webClientUrl: value.webClientUrl ?? '',
     corsOrigins: value.corsOrigins,
     accessTokenTtlSeconds: value.accessTokenTtlSeconds,
     refreshTokenTtlSeconds: value.refreshTokenTtlSeconds,
@@ -353,6 +357,7 @@ function applyImmediateConfig(
   value: unknown,
 ): void {
   if (RESTART_CONFIG_KEYS.has(key)) return;
+  if (key === 'webClientUrl') runtimeConfig.webClientUrl = value as string;
   if (key === 'corsOrigins') runtimeConfig.corsOrigins = value as string[];
   if (key === 'accessTokenTtlSeconds') runtimeConfig.accessTokenTtlSeconds = value as number;
   if (key === 'refreshTokenTtlSeconds') runtimeConfig.refreshTokenTtlSeconds = value as number;

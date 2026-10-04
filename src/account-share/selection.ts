@@ -13,7 +13,7 @@ export function parseBatchShareOptions(input: Record<string, unknown>): BatchSha
     }
     result.scopeMode = input.scopeMode;
   }
-  for (const key of ['canEditLogs', 'canDeleteLogs'] as const) {
+  for (const key of ['canEditLogs', 'canDeleteLogs', 'requireCollaborationForPersonalEdits'] as const) {
     if (input[key] === undefined) continue;
     if (typeof input[key] !== 'boolean') throw new AppError(422, 'VALIDATION_FAILED', `${key} must be boolean`);
     result[key] = input[key];
@@ -39,6 +39,7 @@ export function parseBatchShareOptions(input: Record<string, unknown>): BatchSha
 
 export function resolveBatchShareOptions(db: Database.Database, owner: string, input: BatchShareOptions, previous?: AccountShareGrantRow): Required<BatchShareOptions> {
   const result = {
+    requireCollaborationForPersonalEdits: input.requireCollaborationForPersonalEdits ?? previous?.personal_edit_requires_collaboration === 1,
     scopeMode: input.scopeMode ?? previous?.scope_mode ?? 'all',
     selectedSessions: input.selectedSessions ?? (previous ? JSON.parse(previous.selected_sessions_json) as SelectedShareSession[] : []),
     canEditLogs: input.canEditLogs ?? (previous?.can_edit_logs === 1),
@@ -53,7 +54,9 @@ export function resolveBatchShareOptions(db: Database.Database, owner: string, i
       ? getValidatedPersonalSnapshot(db, owner) : null;
     for (const row of result.selectedSessions) {
       const owned = row.source === 'personal'
-        ? personal?.sessions.some(s => s.session_id === row.sessionId && !s.deleted_at)
+        ? personal?.sessions.some(s => s.session_id === row.sessionId && !s.deleted_at) ||
+          db.prepare(`SELECT 1 FROM personal_session_promotions p JOIN sessions s ON s.id = p.session_id
+            WHERE p.session_id = ? AND p.owner_user_id = ? AND s.owner_user_id = p.owner_user_id AND s.deleted_at IS NULL`).get(row.sessionId, owner)
         : db.prepare('SELECT 1 FROM sessions WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(row.sessionId, owner);
       if (!owned) throw new AppError(404, 'SHARE_SESSION_UNAVAILABLE', 'Only your own synchronized sessions can be shared', { sessionId: row.sessionId });
     }

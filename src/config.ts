@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import { validateWebClientUrl } from './client-link';
 
 dotenv.config();
 
@@ -18,6 +19,7 @@ export interface AppConfig {
   rateLimitEnabled: boolean;
   environment: string;
   containerMode?: boolean;
+  webClientUrl?: string;
   llmProvider: 'disabled' | 'openai-responses' | 'openai-chat' | 'anthropic';
   llmBaseUrl: string;
   llmModel: string;
@@ -101,6 +103,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     rateLimitEnabled: parseBoolean(env.RATE_LIMIT_ENABLED, true),
     environment: env.NODE_ENV?.trim() || 'development',
     containerMode: parseBoolean(env.CONTAINER_MODE, false),
+    webClientUrl: validateWebClientUrl(env.WEB_CLIENT_URL ?? ''),
     llmProvider: parseLlmProvider(env.LLM_PROVIDER),
     llmBaseUrl: env.LLM_BASE_URL?.trim() || '',
     llmModel: env.LLM_MODEL?.trim() || '',

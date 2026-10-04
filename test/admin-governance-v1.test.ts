@@ -1373,18 +1373,22 @@ describe('v1 administrator governance API', { concurrency: false }, () => {
         updates: {
           accessTokenTtlSeconds: 234,
           corsOrigins: ['https://radio.example'],
+          webClientUrl: 'https://client.example/',
         },
         reason: 'Other operational overrides remain configurable',
       },
     });
     assert.equal(accepted.status, 200, accepted.text);
     assert.equal(accepted.body.effective.accessTokenTtlSeconds, 234);
+    assert.equal(runtimeConfig.webClientUrl, 'https://client.example/');
+    assert.equal((await request('/api/v1/server-info')).body.webClientUrl, 'https://client.example/');
     assert.deepEqual(accepted.body.effective.corsOrigins, ['https://radio.example']);
     assert.equal(runtimeConfig.accessTokenTtlSeconds, 234);
     assert.deepEqual(runtimeConfig.corsOrigins, ['https://radio.example']);
     assert.deepEqual(accepted.body.overrides, {
       accessTokenTtlSeconds: 234,
       corsOrigins: ['https://radio.example'],
+      webClientUrl: 'https://client.example/',
     });
 
     const clear = await request('/api/v1/admin/operational-settings', {
@@ -1395,6 +1399,7 @@ describe('v1 administrator governance API', { concurrency: false }, () => {
         updates: {
           accessTokenTtlSeconds: null,
           corsOrigins: null,
+          webClientUrl: null,
         },
         reason: 'Restore the container test baseline',
       },

@@ -56,7 +56,7 @@ test('migration 31 preserves existing data and makes direct join opt-in', async 
   assert.throws(() => f.db.prepare("UPDATE session_friend_access SET default_role = 'owner'").run());
   assert.throws(() => f.db.prepare("UPDATE session_friend_access SET join_policy = 'anything'").run());
   runMigrations(f.db);
-  assert.equal(f.db.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get(), 32);
+  assert.equal(f.db.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get(), 33);
 });
 
 test('only owners configure direct joining, defaults stay private and legacy updates remain compatible', async t => {

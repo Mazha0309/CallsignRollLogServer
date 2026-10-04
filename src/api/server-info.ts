@@ -35,6 +35,7 @@ export function createServerInfoRouter(dependencies: ServerInfoDependencies = {}
         'personalDictionarySnapshots',
         'accountSessionSharing',
         'batchSessionSharing',
+        'personalSharePromotion',
         'friendCollaboration',
         'friendUserSearch',
         'friendDirectJoin',
@@ -76,6 +77,7 @@ export function createServerInfoRouter(dependencies: ServerInfoDependencies = {}
       res.json({
         serverInstanceId: row.instance_id,
         serverVersion: SERVER_VERSION,
+        webClientUrl: runtimeConfig.webClientUrl ?? '',
         protocolMin: 1,
         protocolMax: 1,
         features,

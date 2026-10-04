@@ -14,6 +14,7 @@ export type GrantorShareRole = 'owner' | 'editor' | 'viewer';
 
 export interface SelectedShareSession { source: ShareSource; sessionId: string }
 export interface BatchShareOptions {
+  requireCollaborationForPersonalEdits?: boolean;
   scopeMode?: 'all' | 'selected';
   selectedSessions?: SelectedShareSession[];
   canEditLogs?: boolean;
@@ -44,6 +45,7 @@ export interface AccountShareGrantRow {
   scope_mode: 'all' | 'selected';
   selected_sessions_json: string;
   can_edit_logs: number;
+  personal_edit_requires_collaboration: number;
   can_delete_logs: number;
 }
 

@@ -2382,6 +2382,28 @@ const migrations: readonly Migration[] = [
       addColumnIfMissing(db, 'account_share_grants', 'can_delete_logs', 'INTEGER NOT NULL DEFAULT 0 CHECK (can_delete_logs IN (0,1))');
     },
   },
+  {
+    version: 33,
+    name: 'personal_session_promotions',
+    checksum: checksum('33', 'personal_session_promotions', 'owner-scoped-alias-and-original-backup:v1', 'web-client-url-override:v1'),
+    up: (db) => {
+      addColumnIfMissing(db, 'account_share_grants', 'personal_edit_requires_collaboration', 'INTEGER NOT NULL DEFAULT 0 CHECK (personal_edit_requires_collaboration IN (0,1))');
+      db.exec(`CREATE TABLE IF NOT EXISTS personal_session_promotions (
+        owner_user_id TEXT NOT NULL REFERENCES users(id),
+        session_id TEXT NOT NULL REFERENCES sessions(id),
+        original_snapshot_json TEXT NOT NULL,
+        promoted_at TEXT NOT NULL,
+        PRIMARY KEY (owner_user_id, session_id)
+      )`);
+      const definition = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'server_config_overrides'").pluck().get() as string;
+      if (!definition.includes("'webClientUrl'")) {
+        db.exec(`ALTER TABLE server_config_overrides RENAME TO server_config_overrides_v32;
+          ${LLM_SERVER_CONFIG_OVERRIDES_SQL.replace("'llmProvider',", "'webClientUrl', 'llmProvider',")}
+          INSERT INTO server_config_overrides SELECT * FROM server_config_overrides_v32;
+          DROP TABLE server_config_overrides_v32;`);
+      }
+    },
+  },
 ];
 
 function validateMigrationDefinitions(): void {

@@ -291,7 +291,7 @@ test('migration v11 preserves v10 audit data and enforces public capability guar
 
     assert.equal(
       db.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get(),
-      32,
+      33,
     );
     assert.deepEqual(
       db.prepare(`

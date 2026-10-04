@@ -23,6 +23,9 @@ import { getDb } from '../db/database';
 import { AppError } from '../errors/app-error';
 import { createAccessTokenMiddleware, V1AuthRequest } from '../middleware/auth-v1';
 import { rejectUnknownKeys, requireJsonObject, requireString } from '../utils/validation';
+import { completePersonalPromotion, promotedPersonalSessionIds } from '../account-share/promotion';
+import { getRequestId } from '../middleware/request-id';
+import { getSocialRealtimeHub } from '../social/realtime';
 
 interface SessionsV1Dependencies {
   db?: Database.Database;
@@ -639,7 +642,11 @@ export function createSessionsV1Router(dependencies: SessionsV1Dependencies = {}
     try {
       const sessionId = normalizeStableId(req.params.sessionId, 'sessionId');
       const body = requireJsonObject(req.body);
-      rejectUnknownKeys(body, ['expectedLogCount']);
+      rejectUnknownKeys(body, ['expectedLogCount', 'personalSnapshotRevision']);
+      if (body.personalSnapshotRevision !== undefined &&
+          (!Number.isSafeInteger(body.personalSnapshotRevision) || Number(body.personalSnapshotRevision) < 1)) {
+        throw new AppError(422, 'VALIDATION_FAILED', 'personalSnapshotRevision must be a positive integer');
+      }
       if (!Number.isSafeInteger(body.expectedLogCount) || Number(body.expectedLogCount) < 0) {
         throw new AppError(422, 'VALIDATION_FAILED', 'expectedLogCount must be a non-negative integer');
       }
@@ -665,13 +672,19 @@ export function createSessionsV1Router(dependencies: SessionsV1Dependencies = {}
         const count = db.prepare('SELECT COUNT(*) AS count FROM logs WHERE session_id = ?').get(
           sessionId,
         ) as { count: number };
-        if (Number(count.count) !== expectedLogCount) {
+        const recoveringPromotion = body.personalSnapshotRevision !== undefined && session.status === 'active' &&
+          promotedPersonalSessionIds(db, req.auth!.userId).has(sessionId);
+        if (Number(count.count) !== expectedLogCount && !recoveringPromotion) {
           throw new AppError(409, 'LOG_COUNT_MISMATCH', 'Bootstrap Log count does not match', {
             expectedLogCount,
             actualLogCount: Number(count.count),
           });
         }
         let event: CollaborationEvent | undefined;
+        if (body.personalSnapshotRevision !== undefined) completePersonalPromotion(db, {
+            owner: req.auth!.userId, sessionId, expectedRevision: Number(body.personalSnapshotRevision),
+            mutationId, requestId: getRequestId(req),
+          });
         if (session.status === 'initializing') {
           const now = new Date().toISOString();
           db.prepare(`
@@ -714,6 +727,7 @@ export function createSessionsV1Router(dependencies: SessionsV1Dependencies = {}
       });
       const result = transaction.immediate();
       if ('event' in result && result.event) getRealtimeHub(db).publish(result.event);
+      if (body.personalSnapshotRevision !== undefined) getSocialRealtimeHub(db).sharedCatalogChanged(req.auth!.userId);
       if (replayed) res.setHeader('Idempotent-Replay', 'true');
       res.status(result.status).json(result.body);
     } catch (error) {

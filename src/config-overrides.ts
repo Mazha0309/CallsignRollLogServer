@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { AppConfig } from './config';
+import { validateWebClientUrl } from './client-link';
 
 const baseConfigs = new WeakMap<AppConfig, AppConfig>();
 
@@ -32,6 +33,9 @@ export function applyStoredConfigOverrides(
     if (row.key === 'port' && value.containerMode === true) continue;
     const parsed = JSON.parse(row.value_json) as unknown;
     switch (row.key) {
+      case 'webClientUrl':
+        value.webClientUrl = validateWebClientUrl(parsed);
+        break;
       case 'corsOrigins':
         if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== 'string')) {
           throw new Error('Stored corsOrigins override is invalid');

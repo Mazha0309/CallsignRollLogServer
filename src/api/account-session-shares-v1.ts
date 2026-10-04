@@ -80,6 +80,7 @@ export function createAccountSessionSharesV1Router(
         'canJoinAs',
         'expiresAt',
         'scopeMode', 'selectedSessions', 'canEditLogs', 'canDeleteLogs',
+        'requireCollaborationForPersonalEdits',
       ]);
       const mutationId = requireIdempotencyKey(req);
       const requestHash = computeRequestHash('POST', '/api/v1/account/session-shares', body);
@@ -185,6 +186,7 @@ export function createAccountSessionSharesV1Router(
         'canJoinAs',
         'expiresAt',
         'scopeMode', 'selectedSessions', 'canEditLogs', 'canDeleteLogs',
+        'requireCollaborationForPersonalEdits',
       ]);
       const mutationId = requireIdempotencyKey(req);
       const requestHash = computeRequestHash(

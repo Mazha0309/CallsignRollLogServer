@@ -14,6 +14,7 @@ export const ACCOUNT_SHARE_AUDIT_ACTIONS = [
   'account_share.log_created',
   'account_share.log_updated',
   'account_share.log_deleted',
+  'account_share.session_promoted',
 ] as const;
 
 export type AccountShareAuditAction = (typeof ACCOUNT_SHARE_AUDIT_ACTIONS)[number];

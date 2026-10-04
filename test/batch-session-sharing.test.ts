@@ -12,6 +12,8 @@ import { mutateSharedRecord } from '../src/account-share/records';
 import { validatePersonalSnapshot } from '../src/personal-snapshot/model';
 import { AppError } from '../src/errors/app-error';
 import { runMigrations } from '../src/db/migrations';
+import { completePersonalPromotion, rejectPromotedPersonalSessions } from '../src/account-share/promotion';
+import { getValidatedPersonalSnapshot } from '../src/session-catalog/account-session-catalog';
 
 let db: ReturnType<typeof openDatabase>;
 const now = new Date().toISOString();
@@ -115,6 +117,8 @@ test('migration preserves legacy sharing without granting write access', () => {
     ALTER TABLE account_share_grants DROP COLUMN selected_sessions_json;
     ALTER TABLE account_share_grants DROP COLUMN can_edit_logs;
     ALTER TABLE account_share_grants DROP COLUMN can_delete_logs;
+    ALTER TABLE account_share_grants DROP COLUMN personal_edit_requires_collaboration;
+    DROP TABLE personal_session_promotions;
     DELETE FROM schema_migrations WHERE version >= 32;`);
   runMigrations(db); runMigrations(db);
   assert.deepEqual(db.prepare('SELECT status,scope_mode,selected_sessions_json,can_edit_logs,can_delete_logs FROM account_share_grants WHERE id=?').get(g.id),
@@ -166,4 +170,65 @@ test('HTTP validates batch payloads and mutation permissions', async () => {
     const write=await fetch(`${url}/shared-sessions/collaboration/c1/logs/mutations`,{method:'POST',headers:headers('reader'),body:JSON.stringify({grantId:share.id,operation:'create',syncId:'http-r1',baseVersion:0,value})}); assert.equal(write.status,200);
     const denied=await fetch(`${url}/shared-sessions/collaboration/c1/logs/mutations`,{method:'POST',headers:headers('reader'),body:JSON.stringify({grantId:share.id,operation:'delete',syncId:'http-r1',baseVersion:1})}); assert.equal(denied.status,403);
   } finally { await new Promise<void>(resolve=>server.close(()=>resolve())); }
+});
+
+function preparePromotion() {
+  const g = grant({canEditLogs:true, scopeMode:'selected', selectedSessions:[{source:'personal',sessionId:'p1'}]});
+  write(g.id,'personal','p1',{operation:'create',syncId:'promoted-row',expectedRevision:1,value});
+  const snapshot = getValidatedPersonalSnapshot(db,'owner')!;
+  updateShareGrant(db,{grantId:g.id,actorUserId:'owner',requireCollaborationForPersonalEdits:true,requestId:'policy',mutationId:'policy'});
+  session('p1');
+  db.prepare("UPDATE sessions SET status='initializing',title='owner-p1' WHERE id='p1'").run();
+  db.prepare(`INSERT INTO logs (sync_id,session_id,controller,callsign,time,version,created_at,updated_at,created_by,updated_by)
+    VALUES ('promoted-row','p1',?,?,?,1,?,?,'owner','owner')`).run(value.controller,value.callsign,value.time,now,now);
+  return {g,snapshot};
+}
+function promote(owner='owner', expectedRevision=2) {
+  db.transaction(()=>{
+    completePersonalPromotion(db,{owner,sessionId:'p1',expectedRevision,requestId:'promotion',mutationId:'promotion'});
+    db.prepare("UPDATE sessions SET status='active' WHERE id='p1'").run();
+  }).immediate();
+}
+test('explicit promotion preserves identity, records, selected grants and deletion boundaries',()=>{
+  const {g,snapshot}=preparePromotion();
+  assert.equal(listSharedSessions(db,'reader').items.filter(s=>s.sessionId==='p1').length,1);
+  assert.equal(listSharedSessions(db,'reader').items.find(s=>s.sessionId==='p1')?.canEditLogs,false);
+  assert.throws(()=>write(g.id,'personal','p1',{operation:'update',syncId:'promoted-row',expectedRevision:2,patch:{qth:'bypass'}}),fails('SHARE_PERMISSION_DENIED'));
+  promote();
+  const shared=listSharedSessions(db,'reader').items;
+  assert.equal(shared.length,1); assert.equal(shared[0].source,'collaboration');
+  assert.equal(shared[0].sessionId,'p1'); assert.equal(shared[0].canEditLogs,true); assert.equal(shared[0].canDeleteLogs,false);
+  assert.equal(db.prepare("SELECT count(*) FROM session_members WHERE user_id='reader'").pluck().get(),0);
+  assert.equal(getValidatedPersonalSnapshot(db,'owner')!.sessions.some(s=>s.session_id==='p1'),false);
+  const backup=JSON.parse(db.prepare("SELECT original_snapshot_json FROM personal_session_promotions WHERE owner_user_id='owner'").pluck().get() as string);
+  assert.deepEqual(backup.logs,snapshot.logs.filter(s=>s.session_id==='p1'));
+  assert.throws(()=>rejectPromotedPersonalSessions(db,'owner',snapshot),fails('PERSONAL_SESSION_PROMOTED'));
+  write(g.id,'collaboration','p1',{operation:'update',syncId:'promoted-row',baseVersion:1,patch:{qth:'allowed'}});
+  assert.throws(()=>write(g.id,'collaboration','p1',{operation:'delete',syncId:'promoted-row',baseVersion:2}),fails('SHARE_PERMISSION_DENIED'));
+  revokeShareGrant(db,{grantId:g.id,actorUserId:'owner',requestId:'revoke',mutationId:'revoke'});
+  assert.throws(()=>write(g.id,'collaboration','p1',{operation:'update',syncId:'promoted-row',baseVersion:2,patch:{qth:'no'}}),fails('NOT_FOUND'));
+  assert.equal(db.prepare("SELECT qth FROM logs WHERE sync_id='promoted-row'").pluck().get(),'allowed');
+});
+test('promotion rejects a wrong owner, stale snapshot, changed records and closed personal sessions atomically',()=>{
+  preparePromotion();
+  assert.throws(()=>promote('reader'),fails('PERSONAL_PROMOTION_STATE_INVALID'));
+  assert.throws(()=>promote('owner',1),fails('VERSION_CONFLICT'));
+  db.prepare("UPDATE logs SET callsign='CHANGED' WHERE sync_id='promoted-row'").run();
+  assert.throws(()=>promote(),fails('PERSONAL_PROMOTION_CONTENT_MISMATCH'));
+  assert.equal(db.prepare('SELECT count(*) FROM personal_session_promotions').pluck().get(),0);
+  assert.equal(getValidatedPersonalSnapshot(db,'owner')!.sessions.length,2);
+  db.prepare("UPDATE logs SET callsign=? WHERE sync_id='promoted-row'").run(value.callsign);
+  db.exec(`CREATE TRIGGER reject_promotion_audit BEFORE INSERT ON account_share_audit_events
+    WHEN NEW.action='account_share.session_promoted' BEGIN SELECT RAISE(ABORT,'audit failed'); END;`);
+  assert.throws(()=>promote());
+  assert.equal(db.prepare('SELECT count(*) FROM personal_session_promotions').pluck().get(),0);
+  assert.equal(getValidatedPersonalSnapshot(db,'owner')!.sessions.length,2);
+  assert.equal(db.prepare("SELECT status FROM sessions WHERE id='p1'").pluck().get(),'initializing');
+});
+test('all shares do not publish future personal sessions or create broad memberships',()=>{
+  const {g}=preparePromotion();
+  updateShareGrant(db,{grantId:g.id,actorUserId:'owner',scopeMode:'all',requestId:'all',mutationId:'all'});
+  promote();
+  assert.equal(listSharedSessions(db,'reader').items.find(s=>s.sessionId==='p2')?.canEditLogs,false);
+  assert.equal(db.prepare("SELECT count(*) FROM sessions WHERE id='p2'").pluck().get(),0);
 });

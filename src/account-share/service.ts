@@ -151,7 +151,8 @@ export function createShareRequest(
     if (existing) {
       if (sameShareScope(existing, scope) && existing.scope_mode === batch.scopeMode &&
           existing.selected_sessions_json === JSON.stringify(batch.selectedSessions) &&
-          existing.can_edit_logs === Number(batch.canEditLogs) && existing.can_delete_logs === Number(batch.canDeleteLogs)) return grantDto(existing);
+          existing.can_edit_logs === Number(batch.canEditLogs) && existing.can_delete_logs === Number(batch.canDeleteLogs) &&
+          existing.personal_edit_requires_collaboration === Number(batch.requireCollaborationForPersonalEdits)) return grantDto(existing);
       throw new AppError(
         409,
         'ACCOUNT_SHARE_PENDING_EXISTS',
@@ -168,8 +169,8 @@ export function createShareRequest(
       INSERT INTO account_share_grants (
         id, grantor_user_id, grantee_user_id, status,
         include_personal, include_owned, include_editor, can_join_as,
-        created_at, updated_at, expires_at, scope_mode, selected_sessions_json, can_edit_logs, can_delete_logs
-      ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        created_at, updated_at, expires_at, scope_mode, selected_sessions_json, can_edit_logs, can_delete_logs, personal_edit_requires_collaboration
+      ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       input.grantorUserId,
@@ -185,6 +186,7 @@ export function createShareRequest(
       JSON.stringify(batch.selectedSessions),
       Number(batch.canEditLogs),
       Number(batch.canDeleteLogs),
+      Number(batch.requireCollaborationForPersonalEdits),
     );
     appendAccountShareAudit(db, {
       action: 'account_share.requested',
@@ -423,7 +425,7 @@ export function updateShareGrant(
       UPDATE account_share_grants
       SET include_personal = ?, include_owned = ?, include_editor = ?,
           can_join_as = ?, expires_at = ?, updated_at = ?, scope_mode = ?,
-          selected_sessions_json = ?, can_edit_logs = ?, can_delete_logs = ?
+          selected_sessions_json = ?, can_edit_logs = ?, can_delete_logs = ?, personal_edit_requires_collaboration = ?
       WHERE id = ?
     `).run(
       next.includePersonal ? 1 : 0,
@@ -436,6 +438,7 @@ export function updateShareGrant(
       JSON.stringify(batch.selectedSessions),
       Number(batch.canEditLogs),
       Number(batch.canDeleteLogs),
+      Number(batch.requireCollaborationForPersonalEdits),
       grant.id,
     );
     // Old account shares could create memberships with broader capabilities.
