@@ -1573,6 +1573,70 @@ CREATE TABLE account_share_audit_events (
 );
 `;
 
+const FRIEND_COLLABORATION_SQL = `
+CREATE TABLE friend_requests (
+  id TEXT PRIMARY KEY,
+  sender_id TEXT NOT NULL REFERENCES users(id),
+  recipient_id TEXT NOT NULL REFERENCES users(id),
+  status TEXT NOT NULL CHECK (status IN ('pending','accepted','rejected','cancelled','removed','expired')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  CHECK (sender_id <> recipient_id)
+);
+CREATE UNIQUE INDEX idx_friend_open_pair
+ON friend_requests(MIN(sender_id, recipient_id), MAX(sender_id, recipient_id))
+WHERE status IN ('pending','accepted');
+CREATE INDEX idx_friend_recipient ON friend_requests(recipient_id, status);
+CREATE INDEX idx_friend_sender ON friend_requests(sender_id, status);
+CREATE TABLE friend_blocks (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  blocked_user_id TEXT NOT NULL REFERENCES users(id),
+  PRIMARY KEY(user_id, blocked_user_id),
+  CHECK (user_id <> blocked_user_id)
+);
+CREATE TABLE session_friend_access (
+  session_id TEXT PRIMARY KEY REFERENCES sessions(id),
+  visibility TEXT NOT NULL CHECK (visibility IN ('private','friends')),
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE session_access_requests (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id),
+  sender_id TEXT NOT NULL REFERENCES users(id),
+  recipient_id TEXT NOT NULL REFERENCES users(id),
+  kind TEXT NOT NULL CHECK (kind IN ('invitation','application')),
+  role TEXT NOT NULL CHECK (role IN ('editor','viewer')),
+  status TEXT NOT NULL CHECK (status IN ('pending','accepted','rejected','cancelled','expired')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  CHECK(sender_id <> recipient_id)
+);
+CREATE UNIQUE INDEX idx_session_access_pending
+ON session_access_requests(session_id, CASE WHEN kind = 'invitation' THEN recipient_id ELSE sender_id END)
+WHERE status = 'pending';
+CREATE INDEX idx_session_access_recipient ON session_access_requests(recipient_id, status);
+CREATE INDEX idx_session_access_sender ON session_access_requests(sender_id, status);
+CREATE TRIGGER trg_session_friend_owner_changed
+AFTER UPDATE OF owner_user_id ON sessions
+WHEN NEW.owner_user_id <> OLD.owner_user_id
+BEGIN
+  DELETE FROM session_friend_access WHERE session_id = NEW.id;
+  UPDATE session_access_requests SET status = 'cancelled', updated_at = NEW.updated_at
+  WHERE session_id = NEW.id AND status = 'pending';
+END;
+CREATE TABLE social_audit_events (
+  id TEXT PRIMARY KEY,
+  actor_user_id TEXT NOT NULL REFERENCES users(id),
+  action TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  occurred_at TEXT NOT NULL
+);
+UPDATE processed_mutations SET response_json = json_remove(response_json, '$.passphrase')
+WHERE json_valid(response_json) AND json_type(response_json, '$.passphrase') = 'text';
+`;
+
 const SESSION_COLUMNS: ReadonlyArray<readonly [string, string]> = [
   ['version', 'INTEGER NOT NULL DEFAULT 1'],
   ['event_seq', 'INTEGER NOT NULL DEFAULT 0'],
@@ -2291,6 +2355,12 @@ const migrations: readonly Migration[] = [
       );
       addColumnIfMissing(db, 'session_members', 'account_share_grant_id', 'TEXT');
     },
+  },
+  {
+    version: 30,
+    name: 'friends_and_session_requests',
+    checksum: checksum('30', 'friends_and_session_requests', FRIEND_COLLABORATION_SQL),
+    up(db) { db.exec(FRIEND_COLLABORATION_SQL); },
   },
 ];
 

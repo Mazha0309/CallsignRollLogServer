@@ -11,6 +11,7 @@ import { appendCollaborationAudit } from '../collaboration/audit';
 import { AppError } from '../errors/app-error';
 import { appendAccountShareAudit } from './audit';
 import { AccountShareGrantRow } from './model';
+import { expireShareGrants } from './service';
 
 const MIN_PASSPHRASE = 8;
 const MAX_PASSPHRASE = 128;
@@ -119,6 +120,7 @@ export function joinSessionWithShare(
     mutationId: string;
   },
 ) {
+  expireShareGrants(db);
   return db.transaction(() => {
     const session = findSession(db, input.sessionId);
     if (!session || session.deleted_at) {
@@ -164,7 +166,8 @@ export function joinSessionWithShare(
         UPDATE session_members
         SET role = ?, removed_at = NULL, removed_by = NULL,
             version = version + 1, updated_at = ?,
-            join_source = 'account_share', account_share_grant_id = ?
+            join_source = CASE WHEN removed_at IS NULL THEN join_source ELSE 'account_share' END,
+            account_share_grant_id = CASE WHEN removed_at IS NULL THEN account_share_grant_id ELSE ? END
         WHERE id = ?
       `).run(nextRole, now, grant.id, existing.id);
     }

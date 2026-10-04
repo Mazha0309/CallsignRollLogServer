@@ -31,6 +31,7 @@ import { createAccessTokenMiddleware, V1AuthRequest } from '../middleware/auth-v
 import { createMemoryRateLimiter } from '../middleware/rate-limit';
 import { getRequestId } from '../middleware/request-id';
 import { rejectUnknownKeys, requireJsonObject, requireString } from '../utils/validation';
+import { getSocialRealtimeHub } from '../social/realtime';
 
 interface AccountSessionSharesV1Dependencies {
   db?: Database.Database;
@@ -110,6 +111,7 @@ export function createAccountSessionSharesV1Router(
         status: 201,
         body: payload,
       });
+      getSocialRealtimeHub(database()).notify([share.grantorUserId, share.granteeUserId]);
       res.status(201).json(payload);
     } catch (error) {
       next(error);
@@ -156,6 +158,7 @@ export function createAccountSessionSharesV1Router(
           status: 200,
           body: payload,
         });
+        getSocialRealtimeHub(database()).notify([share.grantorUserId, share.granteeUserId]);
         res.json(payload);
       } catch (error) {
         next(error);
@@ -212,6 +215,7 @@ export function createAccountSessionSharesV1Router(
         status: 200,
         body: payload,
       });
+      getSocialRealtimeHub(database()).notify([share.grantorUserId, share.granteeUserId]);
       res.json(payload);
     } catch (error) {
       next(error);
@@ -295,6 +299,7 @@ export function createAccountSessionSharesV1Router(
         status: 200,
         body: result,
       });
+      getSocialRealtimeHub(database()).notify([req.auth!.userId, result.blockedUserId]);
       res.json(result);
     } catch (error) {
       next(error);
@@ -327,6 +332,7 @@ export function createAccountSessionSharesV1Router(
         status: 200,
         body: result,
       });
+      getSocialRealtimeHub(database()).notify([req.auth!.userId, result.blockedUserId]);
       res.json(result);
     } catch (error) {
       next(error);

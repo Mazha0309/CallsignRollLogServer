@@ -44,11 +44,17 @@ function restoreV12(db: Database.Database): void {
     DROP TABLE public_archive_list_members;
     DROP TABLE public_archive_lists;
     DROP TABLE account_share_audit_events;
+      DROP TRIGGER trg_session_friend_owner_changed;
+      DROP TABLE friend_requests;
+    DROP TABLE friend_blocks;
+    DROP TABLE session_friend_access;
+    DROP TABLE session_access_requests;
+    DROP TABLE social_audit_events;
     DROP TABLE session_join_passphrases;
     DROP TABLE account_share_blocks;
     DROP TABLE account_share_grants;
   `);
-  db.prepare('DELETE FROM schema_migrations WHERE version IN (13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29)').run();
+  db.prepare('DELETE FROM schema_migrations WHERE version IN (13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30)').run();
 }
 
 test('migration v13 installs persistent single-draft and bounded device replay state', async () => {

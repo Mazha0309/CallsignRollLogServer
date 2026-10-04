@@ -47,7 +47,7 @@ Base: `/api/v1/account`
 }
 ```
 
-默认三项范围全开，且至少一项为 true。`canJoinAs` 为 `editor` | `viewer` | `none`。`expiresAt` 仅约束已接受授权；待处理申请固定 14 天过期。
+默认三项范围全开，且至少一项为 true。`canJoinAs` 为 `editor` | `viewer` | `none`。`expiresAt` 默认 null；待处理申请最多保留 14 天，显式更早的到期时间也会生效。已接受授权在显式 `expiresAt` 到期后失效。
 
 Grant DTO: `id`, `grantorUserId`, `granteeUserId`, `status`, `includePersonal`, `includeOwned`, `includeEditor`, `canJoinAs`, `createdAt`, `updatedAt`, `respondedAt`, `revokedAt`, `expiresAt`。
 
@@ -67,6 +67,10 @@ Base: `/api/v1/sessions`
 `POST .../join-with-share` body: `{ "passphrase": "..." }`。
 
 仅当授权人是该协作会话 owner、范围允许、且 `canJoinAs` 不是 `none` 时才能加入。成员写入 `join_source=account_share`。换口令不踢现有共享成员。
+
+已有有效的邀请码/好友成员再次走旧共享加入时保留原成员来源，撤销旧授权不会移除独立加入的成员。设置口令仅首次响应包含明文，幂等回执和重放仅含配置状态及更新时间。
+
+新版客户端以[好友与会话邀请](friends-collaboration-api-v1.md)为主入口；本协议保留用于已有授权兼容。
 
 ## 错误码
 

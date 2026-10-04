@@ -34,6 +34,8 @@ export function createServerInfoRouter(dependencies: ServerInfoDependencies = {}
         'personalCloudSnapshots',
         'personalDictionarySnapshots',
         'accountSessionSharing',
+        'friendCollaboration',
+        'socialWebSocket',
         'requiredPasswordChange',
         'serverAdministration',
         'serverAdministrationAudit',

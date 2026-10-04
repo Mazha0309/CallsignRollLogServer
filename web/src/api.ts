@@ -1,4 +1,5 @@
 import axios, { AxiosError, type AxiosRequestConfig } from 'axios';
+import type { SocialSnapshot } from './social-types';
 import type {
   AdminOverview,
   AdminPersonalDictionarySnapshotDetail,
@@ -321,6 +322,13 @@ export const accountApi = {
     unwrap(api.delete<{ configured: false }>(`/sessions/${encodeURIComponent(sessionId)}/join-passphrase`)),
   joinWithShare: (sessionId: string, passphrase: string) =>
     unwrap(api.post<{ membership: { role: string; joinSource: string } }>(`/sessions/${encodeURIComponent(sessionId)}/join-with-share`, { passphrase })),
+};
+
+export const socialApi = {
+  dashboard: () => unwrap(api.get<SocialSnapshot>('/social')),
+  ticket: () => unwrap(api.post<{ ticket: string; expiresAt: string }>('/social/ws-ticket', {})),
+  mutate: (method: 'POST' | 'PUT' | 'DELETE', path: string, body: Record<string, unknown> = {}, key: string = crypto.randomUUID()) =>
+    unwrap(api.request({ method, url: `/social${path}`, data: body, headers: { 'Idempotency-Key': key } })),
 };
 
 export interface DeviceSession {

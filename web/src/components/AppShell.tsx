@@ -79,7 +79,8 @@ export function AppShell({ admin = false }: { admin?: boolean }) {
   ] : [
     { key: '/app', icon: <HomeOutlined />, label: t('nav.overview') },
     { key: '/app/sessions', icon: <DatabaseOutlined />, label: t('nav.sessions') },
-    { key: '/app/sharing', icon: <ShareAltOutlined />, label: t('nav.sharing') },
+    { key: '/app/friends', icon: <ShareAltOutlined />, label: t('socialTitle') },
+    { key: '/connect', icon: <ShareAltOutlined />, label: t('connect.title') },
     { key: '/app/personal-cloud', icon: <CloudOutlined />, label: t('nav.personalCloud') },
     { key: '/app/public-archives', icon: <GlobalOutlined />, label: t('nav.publicArchives') },
     { key: '/app/account', icon: <UserOutlined />, label: t('nav.account') },

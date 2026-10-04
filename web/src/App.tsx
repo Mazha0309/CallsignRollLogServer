@@ -15,7 +15,9 @@ const SessionsPage = lazy(() => import('./pages/app/SessionsPage'));
 const SessionDetailPage = lazy(() => import('./pages/app/SessionDetailPage'));
 const PersonalSessionDetailPage = lazy(() => import('./pages/app/PersonalSessionDetailPage'));
 const AccountPage = lazy(() => import('./pages/app/AccountPage'));
+const ConnectPage = lazy(() => import('./pages/ConnectPage'));
 const SharingPage = lazy(() => import('./pages/app/SharingPage'));
+const FriendsPage = lazy(() => import('./pages/app/FriendsPage'));
 const SharedSessionDetailPage = lazy(() => import('./pages/app/SharedSessionDetailPage'));
 const PersonalCloudPage = lazy(() => import('./pages/app/PersonalCloudPage'));
 const PublicArchiveListsPage = lazy(() => import('./pages/app/PublicArchiveListsPage'));
@@ -60,6 +62,7 @@ function AppRoutes() {
     <Route path="/login" element={<AuthPage mode="login" />} />
     <Route path="/register" element={<AuthPage mode="register" />} />
     <Route path="/bootstrap" element={<AuthPage mode="bootstrap" />} />
+    <Route path="/connect" element={<ConnectPage />} />
     <Route element={<ProtectedRoute />}>
       <Route path="/app" element={<AppShell />}>
         <Route index element={<OverviewPage />} />
@@ -68,7 +71,9 @@ function AppRoutes() {
         <Route path="sessions/personal/:sessionId" element={<PersonalSessionDetailPage />} />
         <Route path="sessions/:sessionId" element={<SessionDetailPage />} />
         <Route path="sessions/shared/:source/:sessionId" element={<SharedSessionDetailPage />} />
-        <Route path="sharing" element={<SharingPage />} />
+        <Route path="friends" element={<FriendsPage />} />
+        <Route path="sharing" element={<Navigate to="/app/friends" replace />} />
+        <Route path="legacy-sharing" element={<SharingPage />} />
         <Route path="personal-cloud" element={<PersonalCloudPage />} />
         <Route path="public-archives" element={<PublicArchiveListsPage />} />
         <Route path="public-archives/:listId" element={<PublicArchiveListDetailPage />} />

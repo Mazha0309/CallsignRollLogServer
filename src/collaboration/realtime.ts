@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { CollaborationEvent } from './events';
 import { getRuntimeMetrics } from '../operations/metrics';
+import { getSocialRealtimeHub } from '../social/realtime';
 
 export interface CollaborationControlMessage {
   readonly type:
@@ -40,6 +41,7 @@ export class CollaborationRealtimeHub {
   }
 
   publish(event: CollaborationEvent): void {
+    if (event.type.startsWith('session.')) getSocialRealtimeHub(this.db).sessionChanged(event.sessionId);
     getRuntimeMetrics(this.db).recordEventCommitted(event.type);
     for (const connection of [...this.connections]) {
       if (connection.sessionId !== event.sessionId) continue;
@@ -73,6 +75,8 @@ export class CollaborationRealtimeHub {
   }
 
   revoke(sessionId: string, userId: string, reason = 'MEMBERSHIP_REVOKED'): void {
+    getSocialRealtimeHub(this.db).notify([userId]);
+    getSocialRealtimeHub(this.db).sessionChanged(sessionId);
     this.db.prepare(`
       DELETE FROM ws_tickets
       WHERE session_id = ? AND user_id = ? AND consumed_at IS NULL
@@ -95,6 +99,7 @@ export class CollaborationRealtimeHub {
   }
 
   revokeUser(userId: string, reason = 'AUTHENTICATION_CHANGED'): void {
+    getSocialRealtimeHub(this.db).revokeUser(userId);
     this.db.prepare(`
       DELETE FROM ws_tickets WHERE user_id = ? AND consumed_at IS NULL
     `).run(userId);
@@ -118,6 +123,7 @@ export class CollaborationRealtimeHub {
     authSessionId: string,
     reason = 'DEVICE_SESSION_REVOKED',
   ): void {
+    getSocialRealtimeHub(this.db).revokeUser(userId, authSessionId);
     this.db.prepare(`
       DELETE FROM ws_tickets
       WHERE user_id = ? AND auth_session_id = ? AND consumed_at IS NULL
@@ -147,6 +153,8 @@ export class CollaborationRealtimeHub {
     role: string,
     membershipVersion: number,
   ): void {
+    getSocialRealtimeHub(this.db).notify([userId]);
+    getSocialRealtimeHub(this.db).sessionChanged(sessionId);
     this.db.prepare(`
       DELETE FROM ws_tickets
       WHERE session_id = ? AND user_id = ? AND consumed_at IS NULL
@@ -169,6 +177,7 @@ export class CollaborationRealtimeHub {
   }
 
   sessionDeleted(sessionId: string): void {
+    getSocialRealtimeHub(this.db).sessionChanged(sessionId);
     this.db.prepare(`
       DELETE FROM ws_tickets WHERE session_id = ? AND consumed_at IS NULL
     `).run(sessionId);
@@ -263,6 +272,7 @@ export class CollaborationRealtimeHub {
   }
 
   closeAll(): void {
+    getSocialRealtimeHub(this.db).closeAll();
     for (const connection of [...this.connections]) {
       try {
         connection.close();

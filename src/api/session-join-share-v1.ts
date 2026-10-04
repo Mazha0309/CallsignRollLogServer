@@ -74,7 +74,7 @@ export function createSessionJoinShareV1Router(
         userId: req.auth!.userId,
         requestHash,
         status: 200,
-        body: payload,
+        body: { configured: payload.configured, updatedAt: payload.updatedAt },
       });
       res.json(payload);
     } catch (error) {

@@ -7,6 +7,8 @@ export const RESERVED_PUBLIC_ARCHIVE_ALIASES = new Set([
   'app',
   'assets',
   'bootstrap',
+  'client',
+  'connect',
   'favicon.ico',
   'health',
   'live',

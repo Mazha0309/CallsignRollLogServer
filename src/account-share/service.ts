@@ -2,6 +2,8 @@ import { randomUUID } from 'crypto';
 import Database from 'better-sqlite3';
 import { usernameIdentity } from '../auth/username-identity';
 import { appendCollaborationAudit } from '../collaboration/audit';
+import { getRealtimeHub } from '../collaboration/realtime';
+import { getLiveDraftLockManager } from '../collaboration/live-draft';
 import { AppError } from '../errors/app-error';
 import { appendAccountShareAudit } from './audit';
 import { parseShareScope } from './access';
@@ -31,6 +33,28 @@ export interface ShareMutationContext {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function normalizedFutureExpiry(value: string | null): string | null {
+  if (value === null) return null;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp) || timestamp <= Date.now()) {
+    throw new AppError(422, 'VALIDATION_FAILED', 'expiresAt must be a future timestamp');
+  }
+  return new Date(timestamp).toISOString();
+}
+
+export function expireShareGrants(db: Database.Database): void {
+  db.transaction(() => {
+    const expired = db.prepare(`SELECT * FROM account_share_grants WHERE status = 'accepted' AND expires_at IS NOT NULL AND expires_at <= ?`).all(nowIso()) as AccountShareGrantRow[];
+    for (const grant of expired) {
+      revokeAcceptedGrant(db, grant, { actorUserId: grant.grantor_user_id, requestId: randomUUID(), mutationId: randomUUID() });
+      db.prepare("UPDATE account_share_grants SET status = 'expired' WHERE id = ?").run(grant.id);
+    }
+    db.prepare(`UPDATE account_share_grants SET status = 'expired', updated_at = ? WHERE status = 'pending' AND
+      ((expires_at IS NOT NULL AND expires_at <= ?) OR created_at <= ?)`)
+      .run(nowIso(), nowIso(), new Date(Date.now() - PENDING_TTL_MS).toISOString());
+  })();
 }
 
 function findActiveUserByUsername(
@@ -99,6 +123,7 @@ export function createShareRequest(
   },
 ): AccountShareGrantDto {
   const scope = parseShareScope(input);
+  expireShareGrants(db);
   return db.transaction(() => {
     const grantee = findActiveUserByUsername(db, input.granteeUsername);
     if (!grantee) {
@@ -126,9 +151,7 @@ export function createShareRequest(
       throw new AppError(409, 'ACCOUNT_SHARE_INBOX_FULL', 'The share inbox is full');
     }
     const now = nowIso();
-    const expiresAt = input.expiresAt === undefined
-      ? new Date(Date.now() + PENDING_TTL_MS).toISOString()
-      : input.expiresAt;
+    const expiresAt = normalizedFutureExpiry(input.expiresAt ?? null);
     const id = randomUUID();
     db.prepare(`
       INSERT INTO account_share_grants (
@@ -171,6 +194,7 @@ export function acceptShareRequest(
     mutationId: string;
   },
 ): AccountShareGrantDto {
+  expireShareGrants(db);
   return db.transaction(() => {
     const grant = loadGrant(db, input.grantId);
     if (grant.grantee_user_id !== input.actorUserId) {
@@ -246,6 +270,17 @@ function revokeAcceptedGrant(
       SET removed_at = ?, version = version + 1, updated_at = ?
       WHERE id = ? AND removed_at IS NULL
     `).run(now, now, member.id);
+    // Run transport effects after the synchronous transaction has committed.
+    // Recheck the durable row so a rolled-back revoke cannot kick a member.
+    queueMicrotask(() => {
+      if (!db.open || !db.prepare('SELECT 1 FROM session_members WHERE id = ? AND removed_at IS NOT NULL').get(member.id)) return;
+      db.prepare('DELETE FROM live_draft_device_state WHERE session_id = ? AND user_id = ?').run(member.session_id, member.user_id);
+      const released = getLiveDraftLockManager(db).clearUser(member.session_id, member.user_id);
+      const hub = getRealtimeHub(db);
+      if (released.length) hub.publishControl({ type: 'liveDraft.lockChanged', sessionId: member.session_id,
+        occurredAt: nowIso(), action: 'membershipRevoked', fields: released.map(lock => lock.field) });
+      hub.revoke(member.session_id, member.user_id);
+    });
     const updated = db.prepare('SELECT version FROM session_members WHERE id = ?').get(member.id) as {
       version: number;
     };
@@ -348,7 +383,7 @@ export function updateShareGrant(
       includeEditor: input.includeEditor ?? grant.include_editor === 1,
       canJoinAs: input.canJoinAs ?? grant.can_join_as,
     });
-    const expiresAt = input.expiresAt === undefined ? grant.expires_at : input.expiresAt;
+    const expiresAt = input.expiresAt === undefined ? grant.expires_at : normalizedFutureExpiry(input.expiresAt);
     const now = nowIso();
     db.prepare(`
       UPDATE account_share_grants
@@ -432,6 +467,7 @@ export function listShareGrants(
   actorUserId: string,
   box: 'inbox' | 'outbox' | 'active',
 ): AccountShareGrantDto[] {
+  expireShareGrants(db);
   const rows = db.prepare(`
     SELECT * FROM account_share_grants
     WHERE

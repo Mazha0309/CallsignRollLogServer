@@ -1,6 +1,7 @@
 # OpenLogTool Server
 
-OpenLogTool 配套服务端，提供用户认证、Session/日志持久化、管理后台，以及协作 v1 的发布、成员和实时事件协议。
+OpenLogTool 的可选配套服务端，提供用户认证、Session/日志持久化、管理后台，以及协作 v1 的发布、成员和实时事件协议。
+客户端的本地记录、词库、历史和导入导出不依赖服务器或账号；只在需要云同步、好友及多人协作时部署本项目。
 
 完整协作协议见 [Session 协作 v1 设计](docs/superpowers/specs/2026-07-11-collaboration-v1-design.md)。
 当前专项 API 文档采用“主题 + `api-v1`”的 kebab-case 文件名：
@@ -11,6 +12,18 @@ OpenLogTool 配套服务端，提供用户认证、Session/日志持久化、管
 - [Public Live Share Statistics API v1](docs/public-liveshare-statistics-api-v1.md)
 - [Public Archive Lists API v1](docs/public-archive-lists-api-v1.md)
 - [Account Session Sharing API v1](docs/account-session-sharing-api-v1.md)
+- [好友、会话邀请与申请 API v1](docs/friends-collaboration-api-v1.md)
+
+新版共享入口为“好友与协作”：添加好友、处理消息、邀请或申请加入会话。
+好友不会自动获得个人云及历史记录权限；会话默认私有，可由所有者开启好友发现。
+服务端声明 `friendCollaboration` 能力，旧 `accountSessionSharing` 保留兼容。
+
+声明 `socialWebSocket` 的服务器提供账号级 `/ws/social` 通知通道，好友请求、会话邀请及申请
+变化会通知相关账号，无需先成为会话成员。客户端和门户好友页不再定时轮询；首次连接与重连
+都会获取最新列表。连接使用已登录 API 签发的一次性短期票据，不在 URL 中携带登录 token。
+反向代理需允许 `/ws/social` 的 WebSocket Upgrade（与现有 `/ws/` 通道一并转发）。
+
+服务端不再因会话闲置而自动结束共同记录或清除其草稿；结束由发起人明确操作，断线不等于结束。
 
 ## 技术栈
 
@@ -53,6 +66,34 @@ PUBLIC_SHARE_HMAC_KEY=<至少 32 字节的独立随机值>
 登录成员门户或管理后台。若代理终止 TLS，按实际代理层级配置 `TRUST_PROXY`。
 
 ## 安装与启动
+
+### 统一客户端入口（可选）
+
+服务端可同时提供 Flutter WebClient，无需另起一个站点或填写第二套服务器地址。
+在有 Flutter/Rust Web 构建环境的机器上构建客户端，然后将产物交给服务端安装脚本：
+
+~~~bash
+cd ../openlogtool
+bash tool/build_web.sh --base-href /client/
+cd ../OpenLogToolServer
+node scripts/install-web-client.mjs ../openlogtool/build/web
+~~~
+
+安装脚本校验必需文件，保留旧产物为 `web-client.backup-<时间>` 后切换新目录，不改数据库。
+Node 服务默认读取 `./web-client`，也可用 `WEB_CLIENT_DIR` 指定绝对路径；Compose 已将
+`./web-client` 只读挂载到容器。安装或替换产物后重启 Node，或执行
+`docker compose up -d --force-recreate server` 重新挂载目录。
+
+- `/connect`：连接说明、可复制地址和二维码；只有检测到客户端产物时才显示客户端按钮。
+- `/client/`：记录客户端，首次配置默认使用当前站点的服务器地址，保留用户已有配置。
+- `/app/friends`：成员门户的好友入口，和客户端操作同一套好友/邀请/申请数据。
+- `/admin`：管理员后台，仍与普通成员操作分开。
+
+桌面/手机客户端可直接在“服务器与账号”粘贴 `/connect`、`/client/` 或门户链接，
+自动提取服务器地址后正常登录。二维码不含账号密码或 token，不会自动把门户登录态交给客户端。
+WebClient 的 Rust 共享内存要求 HTTPS（或浏览器认可的 localhost）以及服务端已设置的
+COOP/COEP 响应头；反向代理需保留这些头，并将 `/client/` 与 `/connect` 同样转发到服务端。
+没有 WebClient 产物时，原来的 API、成员门户和管理后台不受影响。
 
 ### Docker 首次安装
 

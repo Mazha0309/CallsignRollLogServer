@@ -8,6 +8,7 @@ import {
 } from '../session-catalog/account-session-catalog';
 import { AccountShareGrantRow, GrantorShareRole } from './model';
 import { sessionVisibleThroughGrant } from './access';
+import { expireShareGrants } from './service';
 
 export interface SharedSessionItem {
   source: 'personal' | 'collaboration';
@@ -47,6 +48,7 @@ export function listSharedSessions(
   db: Database.Database,
   granteeUserId: string,
 ): { items: SharedSessionItem[] } {
+  expireShareGrants(db);
   const grants = db.prepare(`
     SELECT g.*, u.username AS grantor_username
     FROM account_share_grants g

@@ -4,7 +4,6 @@ import { config, validateRuntimeConfig } from './config';
 import { applyStoredConfigOverrides, rememberBaseConfig } from './config-overrides';
 import { getDb } from './db/database';
 import { createCollaborationWsServer } from './ws';
-import { startSessionInactivityMonitor } from './operations/session-inactivity';
 
 export function startServer(): Server {
   validateRuntimeConfig(config);
@@ -23,12 +22,8 @@ export function startServer(): Server {
   const runtimeConfig = (app.locals.openLogTool as { config: typeof config }).config;
   const server = createServer(app);
   const collaborationWs = createCollaborationWsServer(server, { db, config: runtimeConfig });
-  const inactivityMonitor = startSessionInactivityMonitor(db, {
-    onError: (sessionId, error) => {
-      console.error(`Failed to auto-close inactive Session ${sessionId}:`, error);
-    },
-  });
-  server.once('close', () => inactivityMonitor.stop());
+  // Session lifetime is explicit. Idle time is not permission to end a shared
+  // recording or discard its draft; no inactivity monitor runs by default.
   server.listen(runtimeConfig.port, () => {
     const address = server.address();
     const port = typeof address === 'object' && address ? address.port : runtimeConfig.port;
@@ -39,7 +34,6 @@ export function startServer(): Server {
   const shutdown = () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    inactivityMonitor.stop();
     collaborationWs.close();
     server.close(() => db.close());
     setTimeout(() => process.exit(1), 10_000).unref();

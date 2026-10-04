@@ -16,6 +16,8 @@ import {
   RealtimeConnection,
 } from '../collaboration/realtime';
 import { getRuntimeMetrics, RuntimeMetrics } from '../operations/metrics';
+import { getSocialRealtimeHub } from '../social/realtime';
+import { AppError } from '../errors/app-error';
 
 interface MemberTicketRow {
   id: string;
@@ -562,6 +564,7 @@ export function createCollaborationWsServer(
 ): CollaborationWsController {
   const { db, config } = dependencies;
   const hub = dependencies.hub ?? getRealtimeHub(db);
+  const socialHub = getSocialRealtimeHub(db);
   const metrics = getRuntimeMetrics(db);
   const wss = new WebSocketServer({
     noServer: true,
@@ -575,6 +578,7 @@ export function createCollaborationWsServer(
   let lastUntrustedProxyWarningAt = 0;
 
   const heartbeat = setInterval(() => {
+    socialHub.heartbeat();
     for (const connection of [...liveConnections]) {
       if (
         connection.audience === 'member' &&
@@ -616,7 +620,9 @@ export function createCollaborationWsServer(
       rejectUpgrade(socket, 400, 'Invalid WebSocket URL');
       return;
     }
-    const audience = url.pathname === '/ws/public'
+    const audience = url.pathname === '/ws/social'
+      ? 'social'
+      : url.pathname === '/ws/public'
       ? 'public'
       : url.pathname === '/ws/collaboration'
         ? 'member'
@@ -625,9 +631,9 @@ export function createCollaborationWsServer(
       rejectUpgrade(socket, 404, 'WebSocket route not found');
       return;
     }
-    metrics.recordWebSocketAttempt(audience);
+    if (audience !== 'social') metrics.recordWebSocketAttempt(audience);
     const rejectKnownUpgrade = (status: number, reason: string, retryAfter?: number) => {
-      metrics.recordWebSocketRejected(audience);
+      if (audience !== 'social') metrics.recordWebSocketRejected(audience);
       rejectUpgrade(socket, status, reason, retryAfter);
     };
     if (audience === 'public' && !req.headers.origin) {
@@ -691,6 +697,16 @@ export function createCollaborationWsServer(
       return;
     }
     const nowIso = new Date().toISOString();
+    if (audience === 'social') {
+      try {
+        const identity = socialHub.consume(ticket, ipAddress);
+        if (!identity) { rejectKnownUpgrade(401, 'A valid one-time ticket is required'); return; }
+        wss.handleUpgrade(req, socket, head, ws => socialHub.accept(ws, identity, ipAddress));
+      } catch (error) {
+        rejectKnownUpgrade(error instanceof AppError ? error.status : 503, 'Account notifications unavailable');
+      }
+      return;
+    }
     let consumedTicket: ConsumedTicket;
     if (audience === 'public') {
       if (!publicShareFeatureAvailable(db, config)) {
@@ -879,6 +895,7 @@ export function createCollaborationWsServer(
     wss,
     close() {
       clearInterval(heartbeat);
+      socialHub.closeAll();
       server.off('upgrade', upgrade);
       for (const connection of [...liveConnections]) connection.close();
       liveConnections.clear();
