@@ -73,6 +73,7 @@ export function AppShell({ admin = false }: { admin?: boolean }) {
     { key: '/admin/public-archives', icon: <GlobalOutlined />, label: t('nav.publicArchives') },
     { key: '/admin/audit', icon: <AuditOutlined />, label: t('nav.audit') },
     { key: '/admin/operations', icon: <ToolOutlined />, label: t('nav.operations') },
+    { key: '/admin/backups', icon: <DatabaseOutlined />, label: t('backup.title') },
     { key: '/admin/settings', icon: <SettingOutlined />, label: t('nav.settings') },
     { type: 'divider' },
     { key: '/app', icon: <AppstoreOutlined />, label: t('nav.memberPortal') },

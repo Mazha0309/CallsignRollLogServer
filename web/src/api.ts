@@ -47,6 +47,14 @@ import type {
 import type { ParsedWorkbook } from './utils/sessionExcelImport';
 import { refreshRetryDelay } from './utils/refreshRetry';
 
+export interface DatabaseRestorePreview {
+  id: string; sha256: string; bytes: number; users: number; sessions: number; logs: number;
+  schemaVersion: number; instanceId: string; adminUsername: string; expiresAt: string;
+}
+export interface DatabaseRecoveryStatus {
+  maxBytes: number; restoreAvailable: boolean; automaticRestart: boolean; pending: boolean;
+  lastResult: { id: string; status: 'completed' | 'failed'; finishedAt: string; safetyBackup: string | null; error?: string } | null;
+}
 interface ErrorEnvelope {
   error?: { code?: string; message?: string; details?: unknown };
   result?: {
@@ -722,6 +730,13 @@ export const adminApi = {
   exportSession: (sessionId: string, format: 'csv' | 'json', includeDeleted: boolean, reason: string) =>
     downloadAdminFile(`/admin/sessions/${encodeURIComponent(sessionId)}/export`, { format, includeDeleted, reason }, `session.${format}`),
   downloadBackup: (reason: string) => downloadAdminFile('/admin/database-backup', { reason }, 'openlogtool.db'),
+  recoveryStatus: () => unwrap(api.get<DatabaseRecoveryStatus>('/admin/database-recovery')),
+  previewRestore: (file: File) => unwrap(api.post<DatabaseRestorePreview>('/admin/database-recovery/preview', file,
+    { headers: { 'Content-Type': 'application/octet-stream' }, timeout: 180_000 })),
+  confirmRestore: (preview: DatabaseRestorePreview, reason: string, confirmation: string, mutationId: string) =>
+    unwrap(api.post('/admin/database-recovery/confirm', { id: preview.id, sha256: preview.sha256, reason, confirmation },
+      { headers: { 'Idempotency-Key': mutationId } })),
+  downloadSafetyBackup: (reason: string) => downloadAdminFile('/admin/database-recovery/safety-backup', { reason }, 'openlogtool-before-restore.sqlite3'),
   audit: (params: { page: number; pageSize: number; action?: string }) =>
     unwrap(api.get<Page<AuditEvent>>('/admin/governance-audit-events', { params })),
   metrics: () => unwrap(api.get<CollaborationMetrics>('/admin/collaboration-metrics')),

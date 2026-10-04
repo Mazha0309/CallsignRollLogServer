@@ -9,6 +9,7 @@ import { createAdminV1Router } from './api/admin-v1';
 import { createAdminPersonalSnapshotsV1Router } from './api/admin-personal-snapshots-v1';
 import { createAdminPersonalDictionarySnapshotsV1Router } from './api/admin-personal-dictionary-snapshots-v1';
 import { createAdminGovernanceV1Router } from './api/admin-governance-v1';
+import { createAdminDatabaseRecoveryRouter } from './api/admin-database-recovery-v1';
 import { createAuthV1Router } from './api/auth-v1';
 import { createWebAuthV1Router } from './api/web-auth-v1';
 import { createAccountV1Router } from './api/account-v1';
@@ -45,6 +46,7 @@ import { requestIdMiddleware } from './middleware/request-id';
 import { getRuntimeMetrics } from './operations/metrics';
 
 export interface CreateAppOptions {
+  onRestoreQueued?: () => void;
   clientDirectory?: string;
   db?: Database.Database;
   config?: Partial<AppConfig>;
@@ -112,6 +114,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
     },
   );
   app.use(express.json({ limit: runtimeConfig.jsonBodyLimit }));
+  app.use('/api/v1/admin/database-recovery', createAdminDatabaseRecoveryRouter({ db, config: runtimeConfig, onRestoreQueued: options.onRestoreQueued }));
 
   app.use(
     '/api/v1/server-info',

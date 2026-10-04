@@ -139,8 +139,6 @@ export default function OperationsPage() {
   const [preview, setPreview] = useState<Record<string, unknown> | null>(null);
   const [working, setWorking] = useState(false);
   const [messageApi, contextHolder] = message.useMessage();
-  const [backupOpen, setBackupOpen] = useState(false);
-  const [backupForm] = Form.useForm();
   const [pruneOpen, setPruneOpen] = useState(false);
   const [pruneForm] = Form.useForm();
   const [pruning, setPruning] = useState(false);
@@ -427,9 +425,8 @@ export default function OperationsPage() {
         <Space wrap><Button icon={<SearchOutlined />} loading={working} onClick={() => void previewRetention()}>{t('admin.preview')}</Button><Button danger type="primary" icon={<DeleteOutlined />} onClick={() => setPruneOpen(true)}>{t('admin.prune')}</Button></Space>
         {preview && <pre className="json-preview" style={{ marginTop: 18 }}>{JSON.stringify(preview, null, 2)}</pre>}
       </Card>
-      <Card className="surface" title={t('admin.backup')}><Alert showIcon type="info" message={t('admin.reauthenticateHint')} style={{ marginBottom: 16 }} /><Button type="primary" icon={<DownloadOutlined />} onClick={() => setBackupOpen(true)}>{t('admin.downloadBackup')}</Button></Card>
+      <Card className="surface" title={t('backup.title')}><Alert showIcon type="info" message={t('backup.scope')} style={{ marginBottom: 16 }} /><Button type="primary" icon={<DownloadOutlined />} onClick={() => navigate('/admin/backups')}>{t('backup.title')}</Button></Card>
     </div>
     <Modal open={pruneOpen} title={t('admin.prune')} okText={t('admin.prune')} cancelText={t('common.cancel')} confirmLoading={pruning} onCancel={() => { setPruneOpen(false); pruneForm.resetFields(); }} onOk={() => void pruneRetention()}><Alert type="warning" showIcon message={t('admin.pruneWarning')} style={{ marginBottom: 16 }} /><Form form={pruneForm} layout="vertical"><Form.Item name="password" label={t('auth.password')} rules={[{ required: true }]}><Input.Password autoComplete="current-password" /></Form.Item><Form.Item name="reason" label={t('admin.reason')} rules={[{ required: true }, { min: 3 }, { max: 500 }]}><Input.TextArea rows={3} maxLength={500} showCount /></Form.Item></Form></Modal>
-    <Modal open={backupOpen} title={t('admin.backup')} okText={t('admin.downloadBackup')} cancelText={t('common.cancel')} onCancel={() => { setBackupOpen(false); backupForm.resetFields(); }} onOk={async () => { const { password, reason } = await backupForm.validateFields(); await adminApi.elevate(password); await adminApi.downloadBackup(reason.trim()); setBackupOpen(false); backupForm.resetFields(); }}><Form form={backupForm} layout="vertical"><Form.Item name="password" label={t('auth.password')} rules={[{ required: true }]}><Input.Password /></Form.Item><Form.Item name="reason" label={t('admin.reason')} rules={[{ required: true }, { min: 3 }]}><Input.TextArea rows={3} /></Form.Item></Form></Modal>
   </>;
 }

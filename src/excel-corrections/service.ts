@@ -140,7 +140,7 @@ export const EXCEL_CORRECTION_SYSTEM_PROMPT = `你是 OpenLogTool 服务端的�
 9. confidence 是 0 到 1 的数字。表头明确、列映射明确时可高；依赖模糊布局时应降低，并在 notes 用简短中文说明。不能确定则跳过。
 
 只输出一个 JSON 对象，禁止 Markdown、代码围栏或解释。严格格式：
-{"records":[{"sourceRow":4,"ordinal":1,"presentFields":["time","controller","callsign","rstSent","rstRcvd","qth","device","power","antenna","height","remarks"],"values":{"time":"20:01","controller":"BG5CTRL","callsign":"BG5ABC","rstSent":"59","rstRcvd":"59","qth":"杭州","device":"IC-705","power":"5W","antenna":"八木","height":"楼顶","remarks":null},"confidence":0.99,"notes":[]}]}
+{"records":[{"sourceRow":4,"ordinal":1,"presentFields":["time","controller","callsign","rstSent","rstRcvd","qth","device","power","antenna","height","remarks"],"values":{"time":"20:01","controller":"BG5CRL","callsign":"BG5ABC","rstSent":"59","rstRcvd":"59","qth":"杭州","device":"IC-705","power":"5W","antenna":"八木","height":"楼顶","remarks":null},"confidence":0.99,"notes":[]}]}
 records 之外不要输出其他顶层字段。没有可确认记录时输出 {"records":[]}。`;
 
 function validationError(message: string, details?: unknown): AppError {

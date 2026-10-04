@@ -30,6 +30,7 @@ const AdminSessionDetailPage = lazy(() => import('./pages/admin/AdminSessionDeta
 const AdminPersonalSessionDetailPage = lazy(() => import('./pages/admin/AdminPersonalSessionDetailPage'));
 const AdminAuditPage = lazy(() => import('./pages/admin/AdminAuditPage'));
 const OperationsPage = lazy(() => import('./pages/admin/OperationsPage'));
+const BackupsPage = lazy(() => import('./pages/admin/BackupsPage'));
 const PublicLiveshareDetailPage = lazy(() => import('./pages/admin/PublicLiveshareDetailPage'));
 const AdminSettingsPage = lazy(() => import('./pages/admin/AdminSettingsPage'));
 const AdminPersonalSnapshotsPage = lazy(() => import('./pages/admin/AdminPersonalSnapshotsPage'));
@@ -93,6 +94,7 @@ function AppRoutes() {
           <Route path="public-archives" element={<AdminPublicArchiveListsPage />} />
           <Route path="audit" element={<AdminAuditPage />} />
           <Route path="operations" element={<OperationsPage />} />
+          <Route path="backups" element={<BackupsPage />} />
           <Route path="operations/liveshares/:publicShareId" element={<PublicLiveshareDetailPage />} />
           <Route path="settings" element={<AdminSettingsPage />} />
         </Route>

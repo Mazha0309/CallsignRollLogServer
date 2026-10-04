@@ -290,7 +290,11 @@ curl -X POST http://127.0.0.1:3000/api/v1/auth/bootstrap \
 | GET | `/api/v1/admin/governance-audit-events` | 分页查询敏感读取与治理审计 |
 | GET/PATCH | `/api/v1/admin/operational-settings` | 读取/修改可编辑运行参数，并明确返回是否需重启 |
 | POST | `/api/v1/admin/sessions/:id/export` | 审计后下载 CSV 或 JSON |
-| POST | `/api/v1/admin/database-backup` | 审计后在线生成并下载 SQLite 备份；恢复仅允许离线 CLI 流程 |
+| POST | `/api/v1/admin/database-backup` | 审计后在线生成并下载一致性 SQLite 备份 |
+| GET | `/api/v1/admin/database-recovery` | 管理员查看恢复能力与最近结果 |
+| POST | `/api/v1/admin/database-recovery/preview` | 重新认证后上传 SQLite 文件校验，不修改当前数据 |
+| POST | `/api/v1/admin/database-recovery/confirm` | 二次确认恢复任务，重启期间先自动备份再以事务替换数据 |
+| POST | `/api/v1/admin/database-recovery/safety-backup` | 重新认证并填写原因，下载最近一次恢复前自动备份 |
 | GET/PUT | `/api/v1/sessions`、`/api/v1/sessions/:id` | 成员 Session 列表与幂等发布初始化 |
 | GET | `/api/v1/sessions/catalog` | 当前成员可访问 Session 的分页目录 |
 | GET | `/api/v1/sessions/:id/logs` | 当前成员的分页日志；返回逐条 `ownedByCurrentUser`/`canMutate` |
@@ -383,6 +387,24 @@ Access token 默认 15 分钟有效，refresh token 默认 30 天有效并在刷
 
 管理员“运行与维护”页面每 10 秒在前台可见时刷新，展示服务进程 CPU/RSS/堆内存、Node 可见的运行环境 CPU/内存与负载、可用时的 cgroup v2 内存、请求错误和成员/公开连接，并列出逐 Live Share 的当前连接和累计有效打开；进入单分享详情后还会显示访客最近可信请求 IP、首末访问时间及当前在线提示。进程计数和当前连接在服务重启后归零；累计打开保存在当前数据库。容器和宿主资源边界会随部署运行时而异，页面会明确标注统计范围，不会把它描述为跨实例监控。
 
+## 备份与恢复
+
+管理员入口：`/admin/backups`（侧边栏“备份与恢复”）。在线备份包含整个数据库，
+**不包含 `.env`、部署文件或客户端本机数据**。备份含密码哈希等敏感信息，须安全保存。
+
+网页恢复仅支持本服务器及其此前恢复实例的**同结构** SQLite 文件（最大 64 MiB）；
+旧版本、跨服务器迁移或更大文件请停服后采用对应版本的离线恢复流程，不要直接替换运行中的数据库。
+上传后展示数量、结构版本与 SHA-256，预览 15 分钟有效，绑定管理员登录会话；
+再次验证密码、填写原因并输入 `RESTORE` 才能确认。原数据在确认后仍不会被在线替换。
+服务停止后，下次启动在 HTTP/WS 监听前执行恢复。默认 Docker `restart: unless-stopped`
+会自动拉起；原生进程需由管理员或进程管理器重新启动。
+
+恢复前自动备份位于数据库同目录 `.database-recovery/before-<任务ID>.sqlite3`。
+替换所有数据及完成审计在同一 SQLite 事务中提交，失败回滚，重复启动不会重复执行已完成任务。
+保留发起管理员的**当前密码**，用户名以校验预览为准；撤销所有登录会话并更换服务器实例 ID，
+客户端需重新登录、核对服务器连接，防止旧游标或待同步修改自动写回。结果可在备份恢复页查看。
+恢复文件与安全备份不会自动删除，请按自己的保留策略离线管理，不要删除待执行任务的文件。
+
 ## 数据库迁移
 
 迁移作为 TypeScript 模块编译进 `dist`，启动时按版本和 checksum 顺序执行，不依赖运行时复制 `schema.sql`。
@@ -430,7 +452,7 @@ npm run test:dist
 npm run verify
 ~~~
 
-`npm run verify` 会依次执行服务端 typecheck、全部 API/迁移测试、正式编译产物冒烟，以及 Web 门户和 Liveshare 的 lint、测试与生产构建。`test:dist` 会使用正式编译产物在临时目录创建数据库，验证迁移表、关键列、唯一索引、外键和 WAL。
+`npm run verify` 会依次执行服务端 typecheck、全部 API/迁移测试、正式编译产物冒烟，以及 Web 门户和 Liveshare 的 lint、测试与生产构建。`test:dist` 会使用正式编译产物在临时目录创建数据库，验证迁移表、关键列、唯一索引、外键和 WAL，并演练备份下载、上传校验、确认停服、重启恢复、令牌撤销和重新登录；不访问生产数据库。
 
 ## Excel AI 校对
 
