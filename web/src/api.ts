@@ -1,5 +1,5 @@
 import axios, { AxiosError, type AxiosRequestConfig } from 'axios';
-import type { SocialSnapshot } from './social-types';
+import type { SocialSnapshot, SocialUserSearchResult } from './social-types';
 import type {
   AdminOverview,
   AdminPersonalDictionarySnapshotDetail,
@@ -16,6 +16,7 @@ import type {
   CursorPage,
   ExcelExportSettings,
   AccountShareGrant,
+  SessionShareOptions,
   SharedSessionSummary,
   ExcelExportSettingsResponse,
   ExcelCorrectionApplyResult,
@@ -87,9 +88,29 @@ const baseURL = '/api/v1';
 const rawApi = axios.create({ baseURL, withCredentials: true, timeout: 20_000 });
 const api = axios.create({ baseURL, withCredentials: true, timeout: 20_000 });
 let accessToken: string | null = null;
+let authAccountId: string | null = null;
+let authGeneration = 0;
 let adminElevation: { token: string; expiresAt: number } | null = null;
 let refreshPromise: Promise<AuthSession> | null = null;
 const authListeners = new Set<(session: AuthSession | null) => void>();
+
+type AuthScopedRequest = AxiosRequestConfig & {
+  _authRetried?: boolean;
+  _authGeneration?: number;
+  _authAccountId?: string | null;
+};
+
+function authContextChanged(): ApiError {
+  return new ApiError(401, 'AUTH_CONTEXT_CHANGED', 'The signed-in account changed; retry from the current account');
+}
+
+function assertAuthGeneration(generation: number): void {
+  if (generation !== authGeneration) throw authContextChanged();
+}
+
+function assertRequestAccount(config: AuthScopedRequest): void {
+  if (config._authGeneration !== authGeneration || config._authAccountId !== authAccountId) throw authContextChanged();
+}
 
 function normalizeError(error: unknown): ApiError {
   if (error instanceof ApiError) return error;
@@ -128,7 +149,14 @@ async function normalizeResponseError(error: unknown): Promise<ApiError> {
   return normalizeError(error);
 }
 
-function publishAuth(session: AuthSession | null) {
+function publishAuth(session: AuthSession | null, newContext = false) {
+  const nextAccountId = session?.user.id ?? null;
+  if (newContext || nextAccountId !== authAccountId) {
+    authGeneration++;
+    adminElevation = null;
+    refreshPromise = null;
+  }
+  authAccountId = nextAccountId;
   accessToken = session?.accessToken ?? null;
   authListeners.forEach((listener) => listener(session));
 }
@@ -139,15 +167,16 @@ export function subscribeAuth(listener: (session: AuthSession | null) => void) {
 }
 
 export function clearAuth() {
-  adminElevation = null;
-  publishAuth(null);
+  // A logout/login boundary invalidates old requests even for the same account.
+  publishAuth(null, true);
 }
 
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
-async function requestRefreshWithOneRotationRetry(): Promise<AuthSession> {
+async function requestRefreshWithOneRotationRetry(generation: number): Promise<AuthSession> {
+  assertAuthGeneration(generation);
   try {
     return (await rawApi.post<AuthSession>('/web-auth/refresh', { deviceId: webDeviceId })).data;
   } catch (failure) {
@@ -155,6 +184,7 @@ async function requestRefreshWithOneRotationRetry(): Promise<AuthSession> {
     const retryAfter = refreshRetryDelay(error);
     if (retryAfter === null) throw error;
     await wait(retryAfter);
+    assertAuthGeneration(generation);
     try {
       return (await rawApi.post<AuthSession>('/web-auth/refresh', { deviceId: webDeviceId })).data;
     } catch (retryFailure) {
@@ -163,33 +193,44 @@ async function requestRefreshWithOneRotationRetry(): Promise<AuthSession> {
   }
 }
 
-function requestRefreshAcrossTabs(): Promise<AuthSession> {
+function requestRefreshAcrossTabs(generation: number): Promise<AuthSession> {
   if (typeof navigator !== 'undefined' && navigator.locks) {
-    return navigator.locks.request('openlogtool.web.refresh', requestRefreshWithOneRotationRetry);
+    return navigator.locks.request('openlogtool.web.refresh', () => requestRefreshWithOneRotationRetry(generation));
   }
-  return requestRefreshWithOneRotationRetry();
+  return requestRefreshWithOneRotationRetry(generation);
 }
 
 export async function refreshAccess(): Promise<AuthSession> {
   if (!refreshPromise) {
-    refreshPromise = requestRefreshAcrossTabs()
+    const generation = authGeneration;
+    const operation = requestRefreshAcrossTabs(generation)
       .then((session) => {
+        assertAuthGeneration(generation);
         publishAuth(session);
         return session;
       })
       .catch((error: unknown) => {
-        publishAuth(null);
+        assertAuthGeneration(generation);
+        clearAuth();
         throw normalizeError(error);
       })
       .finally(() => {
-        refreshPromise = null;
+        if (refreshPromise === operation) refreshPromise = null;
       });
+    refreshPromise = operation;
   }
   return refreshPromise;
 }
 
 api.interceptors.request.use((config) => {
+  const scoped = config as AuthScopedRequest;
+  if (scoped._authGeneration === undefined) {
+    scoped._authGeneration = authGeneration;
+    scoped._authAccountId = authAccountId;
+  }
+  assertRequestAccount(scoped);
   if (accessToken) config.headers.Authorization = `Bearer ${accessToken}`;
+  else delete config.headers.Authorization;
   if (adminElevation && adminElevation.expiresAt > Date.now() && config.url?.startsWith('/admin/')) {
     config.headers['X-Admin-Elevation'] = adminElevation.token;
   }
@@ -197,18 +238,25 @@ api.interceptors.request.use((config) => {
     config.headers['Idempotency-Key'] ??= crypto.randomUUID();
   }
   return config;
-});
+}, (error: unknown) => { throw error; }, { synchronous: true });
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    assertRequestAccount(response.config as AuthScopedRequest);
+    return response;
+  },
   async (error: AxiosError) => {
-    const config = error.config as (AxiosRequestConfig & { _authRetried?: boolean }) | undefined;
+    const config = error.config as AuthScopedRequest | undefined;
     const normalized = await normalizeResponseError(error);
+    if (config) assertRequestAccount(config);
     const refreshable = ['AUTH_REQUIRED', 'TOKEN_EXPIRED', 'TOKEN_INVALID', 'TOKEN_REVOKED'].includes(normalized.code);
     if (error.response?.status === 401 && refreshable && config && !config._authRetried) {
       config._authRetried = true;
       try {
         await refreshAccess();
+        // A different tab may have replaced the HttpOnly refresh cookie with
+        // another account. Never replay this request using that account's token.
+        assertRequestAccount(config);
         return api.request(config);
       } catch (refreshError) {
         throw await normalizeResponseError(refreshError);
@@ -230,33 +278,33 @@ async function unwrapArchive<T>(request: Promise<{ data: { data: T } }>): Promis
   return (await unwrap(request)).data;
 }
 
+async function authenticate(path: string, body: Record<string, unknown>, config?: AxiosRequestConfig): Promise<AuthSession> {
+  clearAuth();
+  const generation = authGeneration;
+  const session = await unwrap(rawApi.post<AuthSession>(path, body, config));
+  assertAuthGeneration(generation);
+  publishAuth(session);
+  return session;
+}
+
 export const authApi = {
   async login(username: string, password: string): Promise<AuthSession> {
-    const data = await unwrap(rawApi.post<AuthSession>('/web-auth/login', { username, password, deviceId: webDeviceId }));
-    publishAuth(data);
-    return data;
+    return authenticate('/web-auth/login', { username, password, deviceId: webDeviceId });
   },
   async register(username: string, password: string): Promise<AuthSession> {
-    const data = await unwrap(rawApi.post<AuthSession>('/web-auth/register', { username, password, deviceId: webDeviceId }));
-    publishAuth(data);
-    return data;
+    return authenticate('/web-auth/register', { username, password, deviceId: webDeviceId });
   },
   async bootstrap(username: string, password: string, bootstrapSecret: string): Promise<AuthSession> {
-    const data = await unwrap(rawApi.post<AuthSession>('/web-auth/bootstrap', { username, password, deviceId: webDeviceId }, { headers: { 'X-Bootstrap-Secret': bootstrapSecret } }));
-    publishAuth(data);
-    return data;
+    return authenticate('/web-auth/bootstrap', { username, password, deviceId: webDeviceId }, { headers: { 'X-Bootstrap-Secret': bootstrapSecret } });
   },
   async completePasswordChange(passwordChangeToken: string, newPassword: string): Promise<AuthSession> {
-    const data = await unwrap(rawApi.post<AuthSession>('/web-auth/complete-password-change', { passwordChangeToken, newPassword, deviceId: webDeviceId }));
-    publishAuth(data);
-    return data;
+    return authenticate('/web-auth/complete-password-change', { passwordChangeToken, newPassword, deviceId: webDeviceId });
   },
   async logout(): Promise<void> {
-    try {
-      await api.post('/web-auth/logout', {});
-    } finally {
-      publishAuth(null);
-    }
+    // Logout is cookie-authenticated. Clear local state at initiation and do
+    // not clear a newer login when this response eventually completes.
+    clearAuth();
+    await unwrap(rawApi.post('/web-auth/logout', {}));
   },
   me: () => unwrap(api.get<User>('/web-auth/me')),
 };
@@ -275,6 +323,16 @@ export const accountApi = {
   revokeDevice: (id: string) => unwrap(api.delete<void>(`/account/devices/${encodeURIComponent(id)}`)),
   sessionCatalog: (params: { page: number; pageSize: number; q?: string; source?: 'collaboration' | 'personal'; status?: string; role?: string; includeDeleted?: boolean }) =>
     unwrap(api.get<Page<AccountSessionSummary>>('/account/session-catalog', { params })),
+  allSessionCatalog: async (params: { q?: string; source?: 'collaboration' | 'personal'; status?: string; role?: string; includeDeleted?: boolean } = {}) => {
+    const items: AccountSessionSummary[] = [];
+    const epoch = authGeneration;
+    for (let page = 1; ; page++) {
+      const result = await accountApi.sessionCatalog({ ...params, page, pageSize: 100 });
+      assertAuthGeneration(epoch);
+      items.push(...result.items);
+      if (page >= result.totalPages) return items;
+    }
+  },
   personalSnapshot: () => unwrap(api.get<{ personalSnapshot: PersonalSnapshotMetadata }>('/account/personal-snapshot')),
   downloadPersonalSnapshot: () => unwrap(api.get<{ personalSnapshot: PersonalSnapshotDownload }>('/account/personal-snapshot/download')),
   exportPersonalSnapshotSessionDatabaseV7: (sessionId: string) => downloadGetFile(
@@ -302,6 +360,11 @@ export const accountApi = {
     includeEditor: boolean;
     canJoinAs: 'editor' | 'viewer' | 'none';
   }) => unwrap(api.post<{ share: AccountShareGrant }>('/account/session-shares', body)),
+  saveBatchShare: (body: SessionShareOptions & { granteeUsername?: string }, id?: string, key: string = crypto.randomUUID()) =>
+    unwrap(api.request<{ share: AccountShareGrant }>({ method: id ? 'PATCH' : 'POST',
+      url: `/account/session-shares${id ? `/${encodeURIComponent(id)}` : ''}`,
+      data: { ...body, includePersonal: true, includeOwned: true, includeEditor: false, canJoinAs: 'none' },
+      headers: { 'Idempotency-Key': key } })),
   acceptSessionShare: (id: string) =>
     unwrap(api.post<{ share: AccountShareGrant }>(`/account/session-shares/${encodeURIComponent(id)}/accept`, {})),
   rejectSessionShare: (id: string) =>
@@ -318,10 +381,19 @@ export const accountApi = {
     unwrap(api.delete<{ blockedUserId: string }>(`/account/session-share-blocks/${encodeURIComponent(username)}`)),
   sharedSessions: () =>
     unwrap(api.get<{ items: SharedSessionSummary[] }>('/account/shared-sessions')),
-  sharedSession: (source: 'personal' | 'collaboration', sessionId: string) =>
-    unwrap(api.get<SharedSessionSummary>(`/account/shared-sessions/${source}/${encodeURIComponent(sessionId)}`)),
-  sharedSessionLogs: (source: 'personal' | 'collaboration', sessionId: string, params: { page: number; pageSize: number }) =>
-    unwrap(api.get<Page<LogRecord>>(`/account/shared-sessions/${source}/${encodeURIComponent(sessionId)}/logs`, { params })),
+  sharedSession: (source: 'personal' | 'collaboration', sessionId: string, grantId?: string) =>
+    unwrap(api.get<SharedSessionSummary>(`/account/shared-sessions/${source}/${encodeURIComponent(sessionId)}`, { params: { grantId } })),
+  sharedSessionLogs: async (source: 'personal' | 'collaboration', sessionId: string, params: { page: number; pageSize: number; grantId?: string; q?: string }) => {
+    const result = await unwrap(api.get<Page<Record<string, unknown>> & { session?: SharedSessionSummary }>(`/account/shared-sessions/${source}/${encodeURIComponent(sessionId)}/logs`, { params }));
+    return { ...result, items: result.items.map(row => ({ ...row,
+      syncId: row.syncId ?? row.sync_id, sessionId: row.sessionId ?? row.session_id,
+      rstSent: row.rstSent ?? row.rst_sent, rstRcvd: row.rstRcvd ?? row.rst_rcvd,
+      createdAt: row.createdAt ?? row.created_at, updatedAt: row.updatedAt ?? row.updated_at,
+    } as unknown as LogRecord)) };
+  },
+  mutateSharedRecord: (session: SharedSessionSummary, body: Record<string, unknown>, key: string = crypto.randomUUID()) =>
+    unwrap(api.post(`/account/shared-sessions/${session.source}/${encodeURIComponent(session.sessionId)}/logs/mutations`,
+      { grantId: session.grantId, ...body }, { headers: { 'Idempotency-Key': key } })),
   joinPassphrase: (sessionId: string) =>
     unwrap(api.get<{ configured: boolean; updatedAt: string | null }>(`/sessions/${encodeURIComponent(sessionId)}/join-passphrase`)),
   setJoinPassphrase: (sessionId: string, passphrase: string) =>
@@ -334,6 +406,7 @@ export const accountApi = {
 
 export const socialApi = {
   dashboard: () => unwrap(api.get<SocialSnapshot>('/social')),
+  searchUsers: (query: string) => unwrap(api.get<SocialUserSearchResult>('/social/users', { params: { query } })),
   ticket: () => unwrap(api.post<{ ticket: string; expiresAt: string }>('/social/ws-ticket', {})),
   mutate: (method: 'POST' | 'PUT' | 'DELETE', path: string, body: Record<string, unknown> = {}, key: string = crypto.randomUUID()) =>
     unwrap(api.request({ method, url: `/social${path}`, data: body, headers: { 'Idempotency-Key': key } })),

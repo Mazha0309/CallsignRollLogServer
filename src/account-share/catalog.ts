@@ -9,6 +9,7 @@ import {
 import { AccountShareGrantRow, GrantorShareRole } from './model';
 import { sessionVisibleThroughGrant } from './access';
 import { expireShareGrants } from './service';
+import { grantSelectsSession } from './selection';
 
 export interface SharedSessionItem {
   source: 'personal' | 'collaboration';
@@ -28,6 +29,8 @@ export interface SharedSessionItem {
   closedAt: string | null;
   deletedAt: string | null;
   snapshotRevision: number | null;
+  canEditLogs: boolean;
+  canDeleteLogs: boolean;
 }
 
 interface CollaborationRow {
@@ -54,13 +57,14 @@ export function listSharedSessions(
     FROM account_share_grants g
     JOIN users u ON u.id = g.grantor_user_id
     WHERE g.grantee_user_id = ? AND g.status = 'accepted'
+      AND u.disabled_at IS NULL AND u.deleted_at IS NULL
   `).all(granteeUserId) as Array<AccountShareGrantRow & { grantor_username: string }>;
 
-  const memberSessionIds = new Set(
+  const memberRoles = new Map(
     (db.prepare(`
-      SELECT session_id FROM session_members
+      SELECT session_id, role FROM session_members
       WHERE user_id = ? AND removed_at IS NULL
-    `).all(granteeUserId) as Array<{ session_id: string }>).map((row) => row.session_id),
+    `).all(granteeUserId) as Array<{ session_id: string; role: string }>).map((row) => [row.session_id, row.role]),
   );
 
   const passphraseSessions = new Set(
@@ -79,6 +83,7 @@ export function listSharedSessions(
     if (scope.includePersonal) {
       const snapshot = getValidatedPersonalSnapshot(db, grant.grantor_user_id);
       if (snapshot) {
+        const snapshotRevision = Number(db.prepare('SELECT revision FROM personal_cloud_snapshots WHERE user_id = ?').pluck().get(grant.grantor_user_id));
         const logCounts = new Map<string, number>();
         for (const log of snapshot.logs) {
           if (!log.deleted_at) {
@@ -86,7 +91,7 @@ export function listSharedSessions(
           }
         }
         for (const session of snapshot.sessions) {
-          if (session.deleted_at) continue;
+          if (session.deleted_at || !grantSelectsSession(grant, 'personal', session.session_id)) continue;
           if (!sessionVisibleThroughGrant({ ...scope, source: 'personal' })) continue;
           items.push({
             source: 'personal',
@@ -105,7 +110,9 @@ export function listSharedSessions(
             updatedAt: session.updated_at,
             closedAt: session.closed_at,
             deletedAt: session.deleted_at,
-            snapshotRevision: null,
+            snapshotRevision,
+            canEditLogs: grant.can_edit_logs === 1 && session.status === 'active',
+            canDeleteLogs: grant.can_edit_logs === 1 && grant.can_delete_logs === 1 && session.status === 'active',
           });
         }
       }
@@ -125,7 +132,11 @@ export function listSharedSessions(
     `).all(grant.grantor_user_id) as CollaborationRow[];
 
     for (const row of collaborationRows) {
-      if (memberSessionIds.has(row.session_id)) continue;
+      const memberRole = memberRoles.get(row.session_id);
+      // An independent viewer membership must not mask an explicit editable
+      // share. Owner/editor memberships already grant all record operations.
+      if (memberRole && (memberRole !== 'viewer' || grant.can_edit_logs !== 1)) continue;
+      if (!grantSelectsSession(grant, 'collaboration', row.session_id)) continue;
       const visible = sessionVisibleThroughGrant({
         ...scope,
         source: 'collaboration',
@@ -154,6 +165,8 @@ export function listSharedSessions(
         closedAt: row.closed_at,
         deletedAt: row.deleted_at,
         snapshotRevision: null,
+        canEditLogs: grant.can_edit_logs === 1 && row.owner_user_id === grant.grantor_user_id && row.status === 'active',
+        canDeleteLogs: grant.can_edit_logs === 1 && grant.can_delete_logs === 1 && row.owner_user_id === grant.grantor_user_id && row.status === 'active',
       });
     }
   }
@@ -168,10 +181,13 @@ export function requireSharedSession(
   granteeUserId: string,
   source: 'personal' | 'collaboration',
   sessionId: string,
+  grantId?: string,
 ): SharedSessionItem {
-  const item = listSharedSessions(db, granteeUserId).items.find(
-    (row) => row.source === source && row.sessionId === sessionId,
+  const matches = listSharedSessions(db, granteeUserId).items.filter(
+    (row) => row.source === source && row.sessionId === sessionId && (!grantId || row.grantId === grantId),
   );
+  if (matches.length > 1) throw new AppError(422, 'SHARE_GRANT_REQUIRED', 'Specify the grantId for this shared session');
+  const item = matches[0];
   if (!item) {
     throw new AppError(404, 'NOT_FOUND', 'Shared session was not found');
   }
@@ -183,8 +199,9 @@ export function getSharedSessionDetail(
   granteeUserId: string,
   source: 'personal' | 'collaboration',
   sessionId: string,
+  grantId?: string,
 ) {
-  const item = requireSharedSession(db, granteeUserId, source, sessionId);
+  const item = requireSharedSession(db, granteeUserId, source, sessionId, grantId);
   if (source === 'personal') {
     return {
       ...item,
@@ -201,22 +218,25 @@ export function listSharedSessionLogs(
   sessionId: string,
   query: Record<string, unknown>,
 ) {
-  const item = requireSharedSession(db, granteeUserId, source, sessionId);
+  const { grantId, ...logQuery } = query;
+  if (grantId !== undefined && typeof grantId !== 'string') throw new AppError(422, 'VALIDATION_FAILED', 'Invalid grantId');
+  const item = requireSharedSession(db, granteeUserId, source, sessionId, grantId);
+  const parsed = parsePersonalSessionLogsQuery(logQuery);
+  if (parsed.includeDeleted) throw new AppError(403, 'FORBIDDEN', 'Deleted records are not shared');
   if (source === 'personal') {
-    return listPersonalSessionLogs(
+    return { ...listPersonalSessionLogs(
       db,
       item.grantorUserId,
       sessionId,
-      parsePersonalSessionLogsQuery(query),
-    );
+      parsed,
+    ), session: item };
   }
-  const parsed = parsePersonalSessionLogsQuery(query);
   const clauses = ['l.session_id = ?', 'l.deleted_at IS NULL'];
   const parameters: Array<string | number> = [sessionId];
   if (parsed.q) {
     clauses.push(`(
-      l.callsign LIKE ? COLLATE NOCASE OR
-      l.controller LIKE ? COLLATE NOCASE
+      l.callsign LIKE ? ESCAPE '\\' COLLATE NOCASE OR
+      l.controller LIKE ? ESCAPE '\\' COLLATE NOCASE
     )`);
     const pattern = `%${parsed.q.replace(/[\\%_]/g, '\\$&')}%`;
     parameters.push(pattern, pattern);
@@ -227,10 +247,11 @@ export function listSharedSessionLogs(
   const rows = db.prepare(`
     SELECT l.* FROM logs l
     WHERE ${where}
-    ORDER BY l.time ASC, l.id ASC
+    ORDER BY ${parsed.sort === 'updatedDesc' ? 'l.updated_at DESC' : parsed.sort === 'timeDesc' ? 'l.time DESC' : 'l.time ASC'}, l.id ASC
     LIMIT ? OFFSET ?
   `).all(...parameters, parsed.pageSize, offset);
   return {
+    session: item,
     items: rows,
     page: parsed.page,
     pageSize: parsed.pageSize,

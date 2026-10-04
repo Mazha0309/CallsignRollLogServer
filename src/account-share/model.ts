@@ -12,6 +12,14 @@ export type ShareJoinRole = 'editor' | 'viewer' | 'none';
 export type ShareSource = 'personal' | 'collaboration';
 export type GrantorShareRole = 'owner' | 'editor' | 'viewer';
 
+export interface SelectedShareSession { source: ShareSource; sessionId: string }
+export interface BatchShareOptions {
+  scopeMode?: 'all' | 'selected';
+  selectedSessions?: SelectedShareSession[];
+  canEditLogs?: boolean;
+  canDeleteLogs?: boolean;
+}
+
 export interface ShareScope {
   includePersonal: boolean;
   includeOwned: boolean;
@@ -33,6 +41,10 @@ export interface AccountShareGrantRow {
   responded_at: string | null;
   revoked_at: string | null;
   expires_at: string | null;
+  scope_mode: 'all' | 'selected';
+  selected_sessions_json: string;
+  can_edit_logs: number;
+  can_delete_logs: number;
 }
 
 export interface AccountShareGrantDto {
@@ -49,6 +61,12 @@ export interface AccountShareGrantDto {
   respondedAt: string | null;
   revokedAt: string | null;
   expiresAt: string | null;
+  scopeMode: 'all' | 'selected';
+  selectedSessions: SelectedShareSession[];
+  canEditLogs: boolean;
+  canDeleteLogs: boolean;
+  grantorUsername?: string;
+  granteeUsername?: string;
 }
 
 export const PENDING_INBOX_CAP = 50;
@@ -69,6 +87,10 @@ export function grantDto(row: AccountShareGrantRow): AccountShareGrantDto {
     respondedAt: row.responded_at,
     revokedAt: row.revoked_at,
     expiresAt: row.expires_at,
+    scopeMode: row.scope_mode,
+    selectedSessions: JSON.parse(row.selected_sessions_json) as SelectedShareSession[],
+    canEditLogs: row.can_edit_logs === 1,
+    canDeleteLogs: row.can_delete_logs === 1,
   };
 }
 

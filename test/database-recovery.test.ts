@@ -36,7 +36,7 @@ test('validates exact schema and lineage; rejects corrupt, foreign and modified-
   const f = await fixture(t);
   const preview = await inspectRestoreFileIsolated(f.file, f.expected);
   assert.equal(preview.users, 1);
-  assert.equal(preview.schemaVersion, 30);
+  assert.equal(preview.schemaVersion, 32);
   assert.throws(() => inspectRestoreFile(f.file, { ...f.expected, instanceId: randomUUID() }), /another server/);
   assert.throws(() => inspectRestoreFile(f.file, { ...f.expected, actorUserId: 'absent' }), /administrator/);
   const backup = openDatabase(f.file);

@@ -31,7 +31,7 @@ function rollBackUsernameIdentityMigration(db: Database.Database): void {
     DROP TABLE session_join_passphrases;
     DROP TABLE account_share_blocks;
     DROP TABLE account_share_grants;
-    DELETE FROM schema_migrations WHERE version IN (21, 22, 23, 24, 25, 26, 27, 28, 29, 30);
+    DELETE FROM schema_migrations WHERE version >= 21;
   `);
 }
 

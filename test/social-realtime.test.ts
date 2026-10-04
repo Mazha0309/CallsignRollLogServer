@@ -68,6 +68,28 @@ test('account socket needs no session membership, authenticates once and rejects
   assert.equal((await closed)[0], 1008);
 });
 
+test('batch share invitations, record changes and expiration notify over account WebSocket', async t => {
+  const f=await fixture(t);
+  const bob=f.connect(await f.issue('bob'));await bob.next();
+  const created=await f.request('alice','/account/session-shares','POST',{granteeUsername:'bob',scopeMode:'all',canEditLogs:true});
+  assert.equal(created.status,201);assert.equal((await bob.next()).type,'social.changed');
+  const grant=created.body.share.id;
+  assert.equal((await f.request('bob',`/account/session-shares/${grant}/accept`,'POST',{})).status,200);
+  assert.equal((await bob.next()).type,'social.changed');
+  const now=new Date().toISOString();
+  const uploaded=await f.request('alice','/account/personal-snapshot','PUT',{expectedRevision:0,confirmation:'REPLACE_PERSONAL_CLOUD_SNAPSHOT',snapshot:{version:1,exportedAt:now,sessions:[{session_id:'personal1',title:'Personal',status:'active',created_at:now,updated_at:now,closed_at:null,deleted_at:null}],logs:[]}});
+  assert.equal(uploaded.status,200);
+  assert.equal((await bob.next()).type,'social.changed');
+  const record=await f.request('bob','/account/shared-sessions/personal/personal1/logs/mutations','POST',{grantId:grant,operation:'create',syncId:'record1',expectedRevision:1,value:{time:now,controller:'BG5CRL',callsign:'BG5AAA'}});
+  assert.equal(record.status,200);
+  assert.equal((await bob.next()).type,'social.changed');
+  f.db.prepare('UPDATE account_share_grants SET expires_at=? WHERE id=?').run('2020-01-01T00:00:00Z',grant);
+  getSocialRealtimeHub(f.db).heartbeat();
+  assert.equal((await bob.next()).type,'social.changed');
+  assert.equal(f.db.prepare('SELECT status FROM account_share_grants WHERE id=?').pluck().get(grant),'expired');
+  assert.equal(f.db.prepare("SELECT COUNT(*) FROM session_members WHERE user_id='bob'").pluck().get(),0);
+});
+
 test('friend requests notify only affected accounts and replay/failure do not notify again', async t => {
   const f = await fixture(t);
   const alice = f.connect(await f.issue('alice'));

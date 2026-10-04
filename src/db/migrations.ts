@@ -2362,6 +2362,26 @@ const migrations: readonly Migration[] = [
     checksum: checksum('30', 'friends_and_session_requests', FRIEND_COLLABORATION_SQL),
     up(db) { db.exec(FRIEND_COLLABORATION_SQL); },
   },
+  {
+    version: 31,
+    name: 'friend_session_direct_join',
+    checksum: checksum('31', 'friend_session_direct_join', 'default-approval-viewer:join-policy-role-checks:v1'),
+    up(db) {
+      addColumnIfMissing(db, 'session_friend_access', 'join_policy', "TEXT NOT NULL DEFAULT 'approval' CHECK (join_policy IN ('approval','direct'))");
+      addColumnIfMissing(db, 'session_friend_access', 'default_role', "TEXT NOT NULL DEFAULT 'viewer' CHECK (default_role IN ('viewer','editor'))");
+    },
+  },
+  {
+    version: 32,
+    name: 'batch_session_share_permissions',
+    checksum: checksum('32', 'batch_session_share_permissions', 'selected-sources-and-log-capabilities:v1'),
+    up(db) {
+      addColumnIfMissing(db, 'account_share_grants', 'scope_mode', "TEXT NOT NULL DEFAULT 'all' CHECK (scope_mode IN ('all','selected'))");
+      addColumnIfMissing(db, 'account_share_grants', 'selected_sessions_json', "TEXT NOT NULL DEFAULT '[]'");
+      addColumnIfMissing(db, 'account_share_grants', 'can_edit_logs', 'INTEGER NOT NULL DEFAULT 0 CHECK (can_edit_logs IN (0,1))');
+      addColumnIfMissing(db, 'account_share_grants', 'can_delete_logs', 'INTEGER NOT NULL DEFAULT 0 CHECK (can_delete_logs IN (0,1))');
+    },
+  },
 ];
 
 function validateMigrationDefinitions(): void {

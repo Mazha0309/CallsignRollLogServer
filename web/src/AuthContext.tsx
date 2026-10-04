@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { authApi, clearAuth, refreshAccess, subscribeAuth } from './api';
+import { authApi, refreshAccess, subscribeAuth } from './api';
 import type { AuthSession, User } from './types';
 
 interface AuthContextValue {
@@ -22,26 +22,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let active = true;
     refreshAccess()
-      .then((session) => { if (active) setUser(session.user); })
-      .catch(() => { if (active) setUser(null); })
+      // subscribeAuth is the sole authority for authentication transitions;
+      // a stale initial refresh must not overwrite a later interactive login.
+      .catch(() => {})
       .finally(() => { if (active) setInitializing(false); });
     return () => { active = false; };
   }, []);
 
   const login = useCallback(async (username: string, password: string) => {
     const session = await authApi.login(username, password);
-    setUser(session.user);
     return session.user;
   }, []);
 
   const register = useCallback(async (username: string, password: string) => {
     const session = await authApi.register(username, password);
-    setUser(session.user);
     return session.user;
   }, []);
 
   const logout = useCallback(async () => {
-    try { await authApi.logout(); } finally { clearAuth(); setUser(null); }
+    await authApi.logout();
   }, []);
 
   const refreshUser = useCallback(async () => setUser(await authApi.me()), []);

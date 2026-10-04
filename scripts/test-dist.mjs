@@ -403,7 +403,7 @@ try {
   );
   assert.equal(
     Number(db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version),
-    30,
+    32,
     'production dist must include the latest migration',
   );
   assert.deepEqual(

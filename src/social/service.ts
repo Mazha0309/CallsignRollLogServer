@@ -126,15 +126,49 @@ export function blockFriend(db: Db, actor: string, username: string, block: bool
   audit(db, actor, block ? 'friend.blocked' : 'friend.unblocked', user.id);
   return { blocked: block };
 }
-export function sessionAccess(db: Db, actor: string, id: string, visibility?: unknown) {
+function readSessionAccess(db: Db, id: string) {
+  const row = db.prepare('SELECT visibility, join_policy, default_role FROM session_friend_access WHERE session_id = ?').get(id) as
+    { visibility: 'private' | 'friends'; join_policy: 'approval' | 'direct'; default_role: 'viewer' | 'editor' } | undefined;
+  return {
+    sessionId: id,
+    visibility: row?.visibility ?? 'private',
+    joinPolicy: row?.visibility === 'friends' ? row.join_policy : 'approval',
+    defaultRole: row?.default_role ?? 'viewer',
+  };
+}
+export function sessionAccess(db: Db, actor: string, id: string, visibility?: unknown, joinPolicy?: unknown, defaultRole?: unknown) {
   requireMembership(db, id, actor, ['owner']);
   if (visibility !== undefined) {
     if (visibility !== 'private' && visibility !== 'friends') fail('VALIDATION_FAILED', 'Invalid visibility', 422);
-    db.prepare(`INSERT INTO session_friend_access VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET visibility = excluded.visibility, updated_at = excluded.updated_at`).run(id, visibility, now());
+    if (joinPolicy !== undefined && joinPolicy !== 'approval' && joinPolicy !== 'direct') fail('VALIDATION_FAILED', 'Invalid join policy', 422);
+    if (defaultRole !== undefined && defaultRole !== 'viewer' && defaultRole !== 'editor') fail('VALIDATION_FAILED', 'Choose viewer or editor', 422);
+    const previous = readSessionAccess(db, id);
+    const policy = visibility === 'private' ? 'approval' : joinPolicy ?? previous.joinPolicy;
+    const role = defaultRole ?? previous.defaultRole;
+    db.prepare(`INSERT INTO session_friend_access (session_id, visibility, updated_at, join_policy, default_role) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(session_id) DO UPDATE SET visibility = excluded.visibility, updated_at = excluded.updated_at, join_policy = excluded.join_policy, default_role = excluded.default_role`).run(id, visibility, now(), policy, role);
     if (visibility === 'private') db.prepare(`UPDATE session_access_requests SET status = 'cancelled', updated_at = ? WHERE session_id = ? AND kind = 'application' AND status = 'pending'`).run(now(), id);
-    audit(db, actor, `session.visibility.${visibility}`, id);
+    audit(db, actor, `session.access.${visibility}.${policy}.${role}`, id);
   }
-  return { sessionId: id, visibility: (db.prepare('SELECT visibility FROM session_friend_access WHERE session_id = ?').get(id) as { visibility: string } | undefined)?.visibility ?? 'private' };
+  return readSessionAccess(db, id);
+}
+export function joinFriendSession(db: Db, actor: string, id: string) {
+  const session = db.prepare(`SELECT owner_user_id FROM sessions WHERE id = ? AND deleted_at IS NULL AND status = 'active'`).get(id) as { owner_user_id: string } | undefined;
+  if (!session) fail('NOT_FOUND', 'Active session not found', 404);
+  requireFriends(db, actor, session.owner_user_id);
+  const access = readSessionAccess(db, id);
+  if (access.visibility !== 'friends') fail('NOT_FOUND', 'Session is private', 404);
+  if (access.joinPolicy !== 'direct') fail('APPROVAL_REQUIRED', 'The owner must approve joining this session', 403);
+  const existing = findMembershipIncludingRemoved(db, id, actor);
+  if (existing?.removed_at) fail('MEMBERSHIP_REVOKED', 'Ask the owner for a new invitation or approval before rejoining', 403);
+  if (existing) return { membership: membershipDto(existing), joined: false };
+  const timestamp = now();
+  db.prepare(`INSERT INTO session_members (id, session_id, user_id, role, version, created_at, updated_at, join_source)
+    VALUES (?, ?, ?, ?, 1, ?, ?, 'friend')`).run(randomUUID(), id, actor, access.defaultRole, timestamp, timestamp);
+  db.prepare(`UPDATE session_access_requests SET status = 'cancelled', updated_at = ?
+    WHERE session_id = ? AND status = 'pending' AND (CASE WHEN kind = 'invitation' THEN recipient_id ELSE sender_id END) = ?`).run(timestamp, id, actor);
+  audit(db, actor, `session.direct_join.${access.defaultRole}`, id);
+  return { membership: membershipDto(findMembership(db, id, actor)!), joined: true };
 }
 export function requestSession(db: Db, actor: string, id: string, kind: 'invitation' | 'application', role: unknown, username?: string) {
   if (role !== 'viewer' && role !== 'editor') fail('VALIDATION_FAILED', 'Choose viewer or editor', 422);
@@ -187,7 +221,15 @@ export function socialDashboard(db: Db, actor: string) {
   const friends = db.prepare(`SELECT u.id AS userId, u.username FROM friend_requests f JOIN users u ON u.id = CASE WHEN f.sender_id = ? THEN f.recipient_id ELSE f.sender_id END WHERE f.status = 'accepted' AND (f.sender_id = ? OR f.recipient_id = ?) AND u.disabled_at IS NULL AND u.deleted_at IS NULL ORDER BY u.username COLLATE NOCASE`).all(actor, actor, actor);
   const friendRequests = (db.prepare(`SELECT * FROM friend_requests WHERE status = 'pending' AND (sender_id = ? OR recipient_id = ?) ORDER BY created_at DESC`).all(actor, actor) as RequestRow[]).map(row => requestDto(db, row));
   const sessionRequests = (db.prepare(`SELECT r.* FROM session_access_requests r JOIN sessions s ON s.id = r.session_id WHERE (r.sender_id = ? OR r.recipient_id = ?) AND s.deleted_at IS NULL AND (r.status = 'pending' OR (r.status = 'accepted' AND r.updated_at > ?)) ORDER BY r.updated_at DESC LIMIT 200`).all(actor, actor, new Date(Date.now() - 30 * 86400_000).toISOString()) as RequestRow[]).map(row => requestDto(db, row));
-  const sessions = db.prepare(`SELECT s.id AS sessionId, s.title, s.status, u.username AS ownerUsername, s.owner_user_id AS ownerId, COALESCE(v.visibility,'private') AS visibility FROM sessions s JOIN users u ON u.id = s.owner_user_id LEFT JOIN session_friend_access v ON v.session_id = s.id WHERE s.deleted_at IS NULL AND s.status = 'active' AND u.disabled_at IS NULL AND u.deleted_at IS NULL AND (s.owner_user_id = ? OR (v.visibility = 'friends' AND EXISTS (SELECT 1 FROM friend_requests f WHERE f.status = 'accepted' AND MIN(f.sender_id,f.recipient_id) = MIN(?,s.owner_user_id) AND MAX(f.sender_id,f.recipient_id) = MAX(?,s.owner_user_id)) AND NOT EXISTS (SELECT 1 FROM session_members m WHERE m.session_id = s.id AND m.user_id = ? AND m.removed_at IS NULL))) ORDER BY s.updated_at DESC LIMIT 500`).all(actor, actor, actor, actor);
+  const sessions = db.prepare(`SELECT s.id AS sessionId, s.title, s.status, u.username AS ownerUsername, s.owner_user_id AS ownerId, COALESCE(v.visibility,'private') AS visibility,
+    CASE WHEN v.visibility = 'friends' THEN v.join_policy ELSE 'approval' END AS joinPolicy, COALESCE(v.default_role,'viewer') AS defaultRole
+    FROM sessions s JOIN users u ON u.id = s.owner_user_id LEFT JOIN session_friend_access v ON v.session_id = s.id
+    WHERE s.deleted_at IS NULL AND s.status = 'active' AND u.disabled_at IS NULL AND u.deleted_at IS NULL
+      AND (s.owner_user_id = ? OR (v.visibility = 'friends'
+        AND EXISTS (SELECT 1 FROM friend_requests f WHERE f.status = 'accepted' AND MIN(f.sender_id,f.recipient_id) = MIN(?,s.owner_user_id) AND MAX(f.sender_id,f.recipient_id) = MAX(?,s.owner_user_id))
+        AND NOT EXISTS (SELECT 1 FROM friend_blocks b WHERE (b.user_id = ? AND b.blocked_user_id = s.owner_user_id) OR (b.user_id = s.owner_user_id AND b.blocked_user_id = ?))
+        AND NOT EXISTS (SELECT 1 FROM session_members m WHERE m.session_id = s.id AND m.user_id = ? AND m.removed_at IS NULL)))
+    ORDER BY s.updated_at DESC LIMIT 500`).all(actor, actor, actor, actor, actor, actor);
   const blocks = db.prepare('SELECT u.id AS userId, u.username FROM friend_blocks b JOIN users u ON u.id = b.blocked_user_id WHERE b.user_id = ? ORDER BY u.username').all(actor);
   return { friends, friendRequests, sessionRequests, sessions, blocks };
 }

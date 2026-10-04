@@ -100,7 +100,7 @@ test('migrations v23-v24 persist bounded public share analytics with visitor IP 
       DROP TABLE session_join_passphrases;
       DROP TABLE account_share_blocks;
       DROP TABLE account_share_grants;
-      DELETE FROM schema_migrations WHERE version IN (23, 24, 25, 26, 27, 28, 29, 30);
+      DELETE FROM schema_migrations WHERE version >= 23;
     `);
     assert.equal(db.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get(), 22);
     runMigrations(db);

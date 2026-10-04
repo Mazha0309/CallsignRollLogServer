@@ -4,6 +4,8 @@ import { WebSocket } from 'ws';
 import { AccessIdentity } from '../middleware/auth-v1';
 import { AppError } from '../errors/app-error';
 import { expireRequests } from './service';
+import { expireShareGrants } from '../account-share/service';
+import { PENDING_TTL_MS } from '../account-share/model';
 
 interface Ticket { identity: AccessIdentity; expiresAt: number }
 interface Connection { ws: WebSocket; identity: AccessIdentity; ipAddress: string; alive: boolean }
@@ -88,9 +90,20 @@ export class SocialRealtimeHub {
   }
 
   /** Called only after the surrounding business transaction commits. */
+  sharedCatalogChanged(owner: string): void {
+    this.notify(this.sharedRecipients(owner));
+  }
+
+  private sharedRecipients(owner: string): Set<string> {
+    return new Set([owner, ...(this.db.prepare(`SELECT grantee_user_id FROM account_share_grants
+      WHERE grantor_user_id = ? AND status = 'accepted'`).all(owner) as { grantee_user_id: string }[]).map(row => row.grantee_user_id)]);
+  }
+
+  /** Called only after the surrounding business transaction commits. */
   sessionChanged(sessionId: string): void {
     const owner = this.db.prepare('SELECT owner_user_id FROM sessions WHERE id = ?').pluck().get(sessionId) as string | undefined;
     const recipients = owner ? socialRecipients(this.db, owner) : new Set<string>();
+    if (owner) for (const user of this.sharedRecipients(owner)) recipients.add(user);
     for (const row of this.db.prepare(`SELECT user_id FROM session_members WHERE session_id = ?`).all(sessionId) as { user_id: string }[]) recipients.add(row.user_id);
     for (const row of this.db.prepare(`SELECT sender_id, recipient_id FROM session_access_requests WHERE session_id = ? AND status = 'pending'`).all(sessionId) as { sender_id: string; recipient_id: string }[]) {
       recipients.add(row.sender_id); recipients.add(row.recipient_id);
@@ -113,6 +126,13 @@ export class SocialRealtimeHub {
       // Expiration changes are pushed too, without periodic client reads.
       const expired = this.db.transaction(() => expireRequests(this.db)).immediate();
       this.notify(expired);
+      const expiredShares = this.db.prepare(`SELECT grantor_user_id, grantee_user_id FROM account_share_grants
+        WHERE status IN ('pending','accepted') AND ((expires_at IS NOT NULL AND expires_at <= ?)
+          OR (status = 'pending' AND created_at <= ?))`).all(new Date().toISOString(), new Date(Date.now() - PENDING_TTL_MS).toISOString()) as { grantor_user_id: string; grantee_user_id: string }[];
+      if (expiredShares.length) {
+        expireShareGrants(this.db);
+        this.notify(expiredShares.flatMap(g => [g.grantor_user_id, g.grantee_user_id]));
+      }
     }
     for (const connection of [...this.connections]) {
       if (!connection.alive || !this.authorized(connection.identity)) { this.drop(connection); continue; }

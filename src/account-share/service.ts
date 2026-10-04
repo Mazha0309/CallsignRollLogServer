@@ -7,6 +7,7 @@ import { getLiveDraftLockManager } from '../collaboration/live-draft';
 import { AppError } from '../errors/app-error';
 import { appendAccountShareAudit } from './audit';
 import { parseShareScope } from './access';
+import { resolveBatchShareOptions, grantSelectsSession } from './selection';
 import {
   AccountShareGrantDto,
   AccountShareGrantRow,
@@ -15,6 +16,7 @@ import {
   ShareJoinRole,
   grantDto,
   sameShareScope,
+  BatchShareOptions,
 } from './model';
 
 export interface ShareMutationContext {
@@ -110,7 +112,7 @@ function findOpenPair(
 
 export function createShareRequest(
   db: Database.Database,
-  input: {
+  input: BatchShareOptions & {
     grantorUserId: string;
     granteeUsername: string;
     includePersonal: boolean;
@@ -139,8 +141,17 @@ export function createShareRequest(
       throw new AppError(403, 'ACCOUNT_SHARE_BLOCKED', 'This share is blocked');
     }
     const existing = findOpenPair(db, input.grantorUserId, grantee.id);
+    const batch = resolveBatchShareOptions(db, input.grantorUserId, input);
+    if ((batch.canEditLogs || batch.canDeleteLogs) && scope.includeEditor) {
+      throw new AppError(422, 'VALIDATION_FAILED', 'You cannot grant write access to another owner’s sessions');
+    }
+    if (batch.selectedSessions.some(row => row.source === 'personal' ? !scope.includePersonal : !scope.includeOwned)) {
+      throw new AppError(422, 'VALIDATION_FAILED', 'Selection contains a disabled source');
+    }
     if (existing) {
-      if (sameShareScope(existing, scope)) return grantDto(existing);
+      if (sameShareScope(existing, scope) && existing.scope_mode === batch.scopeMode &&
+          existing.selected_sessions_json === JSON.stringify(batch.selectedSessions) &&
+          existing.can_edit_logs === Number(batch.canEditLogs) && existing.can_delete_logs === Number(batch.canDeleteLogs)) return grantDto(existing);
       throw new AppError(
         409,
         'ACCOUNT_SHARE_PENDING_EXISTS',
@@ -157,8 +168,8 @@ export function createShareRequest(
       INSERT INTO account_share_grants (
         id, grantor_user_id, grantee_user_id, status,
         include_personal, include_owned, include_editor, can_join_as,
-        created_at, updated_at, expires_at
-      ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
+        created_at, updated_at, expires_at, scope_mode, selected_sessions_json, can_edit_logs, can_delete_logs
+      ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       input.grantorUserId,
@@ -170,6 +181,10 @@ export function createShareRequest(
       now,
       now,
       expiresAt,
+      batch.scopeMode,
+      JSON.stringify(batch.selectedSessions),
+      Number(batch.canEditLogs),
+      Number(batch.canDeleteLogs),
     );
     appendAccountShareAudit(db, {
       action: 'account_share.requested',
@@ -178,7 +193,7 @@ export function createShareRequest(
       mutationId: input.mutationId,
       grantId: id,
       targetUserId: grantee.id,
-      after: { status: 'pending', canJoinAs: scope.canJoinAs },
+      after: { status: 'pending', ...scope, ...batch },
       occurredAt: now,
     });
     return grantDto(loadGrant(db, id));
@@ -245,11 +260,12 @@ export function revokeShareGrant(
   })();
 }
 
-function revokeAcceptedGrant(
+function revokeShareMemberships(
   db: Database.Database,
   grant: AccountShareGrantRow,
   input: { actorUserId: string; requestId: string; mutationId: string },
-): AccountShareGrantDto {
+  retain?: (sessionId: string, role: string) => boolean,
+): void {
   const now = nowIso();
   const members = db.prepare(`
     SELECT id, session_id, user_id, role, version
@@ -265,6 +281,7 @@ function revokeAcceptedGrant(
     version: number;
   }>;
   for (const member of members) {
+    if (retain?.(member.session_id, member.role)) continue;
     db.prepare(`
       UPDATE session_members
       SET removed_at = ?, version = version + 1, updated_at = ?
@@ -298,6 +315,15 @@ function revokeAcceptedGrant(
       removedAt: now,
     });
   }
+}
+
+function revokeAcceptedGrant(
+  db: Database.Database,
+  grant: AccountShareGrantRow,
+  input: { actorUserId: string; requestId: string; mutationId: string },
+): AccountShareGrantDto {
+  const now = nowIso();
+  revokeShareMemberships(db, grant, input);
   db.prepare(`
     UPDATE account_share_grants
     SET status = 'revoked', revoked_at = ?, updated_at = ?
@@ -357,7 +383,7 @@ export function rejectShareRequest(
 
 export function updateShareGrant(
   db: Database.Database,
-  input: {
+  input: BatchShareOptions & {
     grantId: string;
     actorUserId: string;
     includePersonal?: boolean;
@@ -369,12 +395,13 @@ export function updateShareGrant(
     mutationId: string;
   },
 ): AccountShareGrantDto {
+  expireShareGrants(db);
   return db.transaction(() => {
     const grant = loadGrant(db, input.grantId);
     if (grant.grantor_user_id !== input.actorUserId) {
       throw new AppError(403, 'FORBIDDEN', 'Only the grantor can update');
     }
-    if (grant.status !== 'accepted') {
+    if (grant.status !== 'accepted' && grant.status !== 'pending') {
       throw new AppError(409, 'ACCOUNT_SHARE_PENDING_EXISTS', 'Share grant is not accepted');
     }
     const next = parseShareScope({
@@ -383,12 +410,20 @@ export function updateShareGrant(
       includeEditor: input.includeEditor ?? grant.include_editor === 1,
       canJoinAs: input.canJoinAs ?? grant.can_join_as,
     });
+    const batch = resolveBatchShareOptions(db, input.actorUserId, input, grant);
+    if ((batch.canEditLogs || batch.canDeleteLogs) && next.includeEditor) {
+      throw new AppError(422, 'VALIDATION_FAILED', 'You cannot grant write access to another owner’s sessions');
+    }
+    if (batch.selectedSessions.some(row => row.source === 'personal' ? !next.includePersonal : !next.includeOwned)) {
+      throw new AppError(422, 'VALIDATION_FAILED', 'Selection contains a disabled source');
+    }
     const expiresAt = input.expiresAt === undefined ? grant.expires_at : normalizedFutureExpiry(input.expiresAt);
     const now = nowIso();
     db.prepare(`
       UPDATE account_share_grants
       SET include_personal = ?, include_owned = ?, include_editor = ?,
-          can_join_as = ?, expires_at = ?, updated_at = ?
+          can_join_as = ?, expires_at = ?, updated_at = ?, scope_mode = ?,
+          selected_sessions_json = ?, can_edit_logs = ?, can_delete_logs = ?
       WHERE id = ?
     `).run(
       next.includePersonal ? 1 : 0,
@@ -397,8 +432,22 @@ export function updateShareGrant(
       next.canJoinAs,
       expiresAt,
       now,
+      batch.scopeMode,
+      JSON.stringify(batch.selectedSessions),
+      Number(batch.canEditLogs),
+      Number(batch.canDeleteLogs),
       grant.id,
     );
+    // Old account shares could create memberships with broader capabilities.
+    // A narrowed grant must not leave those memberships as an authorization
+    // bypass. Independently invited memberships are deliberately untouched.
+    const updated = loadGrant(db, grant.id);
+    if (grant.status === 'accepted') {
+      revokeShareMemberships(db, grant, input, (sessionId, role) =>
+        updated.include_owned === 1 && (updated.can_join_as === 'editor' || (updated.can_join_as === 'viewer' && role === 'viewer')) &&
+        grantSelectsSession(updated, 'collaboration', sessionId) &&
+        Boolean(db.prepare('SELECT 1 FROM sessions WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(sessionId, updated.grantor_user_id)));
+    }
     appendAccountShareAudit(db, {
       action: 'account_share.updated',
       actorUserId: input.actorUserId,
@@ -407,7 +456,7 @@ export function updateShareGrant(
       grantId: grant.id,
       targetUserId: grant.grantee_user_id,
       before: grantDto(grant) as unknown as Record<string, unknown>,
-      after: { ...next, expiresAt },
+      after: { ...next, ...batch, expiresAt },
       occurredAt: now,
     });
     return grantDto(loadGrant(db, grant.id));
@@ -469,7 +518,10 @@ export function listShareGrants(
 ): AccountShareGrantDto[] {
   expireShareGrants(db);
   const rows = db.prepare(`
-    SELECT * FROM account_share_grants
+    SELECT g.*, owner.username AS grantor_username, recipient.username AS grantee_username
+    FROM account_share_grants g
+    JOIN users owner ON owner.id = g.grantor_user_id
+    JOIN users recipient ON recipient.id = g.grantee_user_id
     WHERE
       CASE ?
         WHEN 'inbox' THEN grantee_user_id = ? AND status = 'pending'
@@ -478,9 +530,9 @@ export function listShareGrants(
           (grantor_user_id = ? OR grantee_user_id = ?) AND status = 'accepted'
         )
       END
-    ORDER BY updated_at DESC, id DESC
-  `).all(box, actorUserId, actorUserId, actorUserId, actorUserId) as AccountShareGrantRow[];
-  return rows.map(grantDto);
+    ORDER BY g.updated_at DESC, g.id DESC
+  `).all(box, actorUserId, actorUserId, actorUserId, actorUserId) as Array<AccountShareGrantRow & { grantor_username: string; grantee_username: string }>;
+  return rows.map(row => ({ ...grantDto(row), grantorUsername: row.grantor_username, granteeUsername: row.grantee_username }));
 }
 
 export function blockAccountShare(

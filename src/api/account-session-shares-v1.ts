@@ -32,6 +32,8 @@ import { createMemoryRateLimiter } from '../middleware/rate-limit';
 import { getRequestId } from '../middleware/request-id';
 import { rejectUnknownKeys, requireJsonObject, requireString } from '../utils/validation';
 import { getSocialRealtimeHub } from '../social/realtime';
+import { parseBatchShareOptions } from '../account-share/selection';
+import { mutateSharedRecord } from '../account-share/records';
 
 interface AccountSessionSharesV1Dependencies {
   db?: Database.Database;
@@ -77,6 +79,7 @@ export function createAccountSessionSharesV1Router(
         'includeEditor',
         'canJoinAs',
         'expiresAt',
+        'scopeMode', 'selectedSessions', 'canEditLogs', 'canDeleteLogs',
       ]);
       const mutationId = requireIdempotencyKey(req);
       const requestHash = computeRequestHash('POST', '/api/v1/account/session-shares', body);
@@ -88,13 +91,14 @@ export function createAccountSessionSharesV1Router(
       const scope = parseShareScope({
         includePersonal: body.includePersonal ?? true,
         includeOwned: body.includeOwned ?? true,
-        includeEditor: body.includeEditor ?? true,
-        canJoinAs: body.canJoinAs ?? 'editor',
+        includeEditor: body.includeEditor ?? (body.scopeMode === undefined),
+        canJoinAs: body.canJoinAs ?? (body.scopeMode === undefined ? 'editor' : 'none'),
       });
       const share = createShareRequest(database(), {
         grantorUserId: req.auth!.userId,
         granteeUsername: requireString(body, 'granteeUsername', { min: 1, max: 64 }),
         ...scope,
+        ...parseBatchShareOptions(body),
         expiresAt: body.expiresAt === undefined
           ? undefined
           : body.expiresAt === null
@@ -180,6 +184,7 @@ export function createAccountSessionSharesV1Router(
         'includeEditor',
         'canJoinAs',
         'expiresAt',
+        'scopeMode', 'selectedSessions', 'canEditLogs', 'canDeleteLogs',
       ]);
       const mutationId = requireIdempotencyKey(req);
       const requestHash = computeRequestHash(
@@ -196,6 +201,7 @@ export function createAccountSessionSharesV1Router(
         grantId: req.params.id,
         actorUserId: req.auth!.userId,
         includePersonal: optionalBoolean(body, 'includePersonal'),
+        ...parseBatchShareOptions(body),
         includeOwned: optionalBoolean(body, 'includeOwned'),
         includeEditor: optionalBoolean(body, 'includeEditor'),
         canJoinAs: body.canJoinAs as 'editor' | 'viewer' | 'none' | undefined,
@@ -241,6 +247,7 @@ export function createAccountSessionSharesV1Router(
         req.auth!.userId,
         source,
         req.params.sessionId,
+        typeof req.query.grantId === 'string' ? req.query.grantId : undefined,
       ));
     } catch (error) {
       next(error);
@@ -271,6 +278,21 @@ export function createAccountSessionSharesV1Router(
     } catch (error) {
       next(error);
     }
+  });
+
+  router.post('/shared-sessions/:source/:sessionId/logs/mutations', ...writeGuards, (req: V1AuthRequest, res, next) => {
+    try {
+      const source = req.params.source;
+      if (source !== 'personal' && source !== 'collaboration') {
+        throw new AppError(422, 'VALIDATION_FAILED', 'Invalid session source');
+      }
+      const body = requireJsonObject(req.body);
+      const result = mutateSharedRecord(database(), {
+        actorUserId: req.auth!.userId, source, sessionId: req.params.sessionId,
+        mutationId: requireIdempotencyKey(req), requestId: getRequestId(req), body,
+      });
+      res.status(result.status).json(result.body);
+    } catch (error) { next(error); }
   });
 
   router.put('/session-share-blocks/:username', ...writeGuards, (req: V1AuthRequest, res, next) => {

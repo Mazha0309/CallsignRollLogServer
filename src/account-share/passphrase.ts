@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'crypto';
 import Database from 'better-sqlite3';
+import { grantSelectsSession } from './selection';
 import {
   findMembership,
   findMembershipIncludingRemoved,
@@ -133,7 +134,7 @@ export function joinSessionWithShare(
       SELECT * FROM account_share_grants
       WHERE grantor_user_id = ? AND grantee_user_id = ? AND status = 'accepted'
     `).get(session.owner_user_id, input.actorUserId) as AccountShareGrantRow | undefined;
-    if (!grant || grant.include_owned !== 1 || (grant.can_join_as !== 'editor' && grant.can_join_as !== 'viewer')) {
+    if (!grant || !grantSelectsSession(grant, 'collaboration', session.id) || grant.include_owned !== 1 || (grant.can_join_as !== 'editor' && grant.can_join_as !== 'viewer')) {
       throw new AppError(403, 'ACCOUNT_SHARE_CANNOT_JOIN', 'Sharing cannot join this session');
     }
     const passphrase = normalizePassphrase(input.passphrase);

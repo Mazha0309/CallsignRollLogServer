@@ -603,6 +603,8 @@ describe('v1 HTTP foundation', { concurrency: false }, () => {
     assert.equal(first.body.protocolMax, 1);
     assert.ok(Array.isArray(first.body.features));
     assert.ok(first.body.features.every((feature) => typeof feature === 'string'));
+    assert.ok(first.body.features.includes('friendUserSearch'));
+    assert.ok(first.body.features.includes('friendDirectJoin'));
     assert.equal(
       first.body.features.includes('collaboration'),
       true,

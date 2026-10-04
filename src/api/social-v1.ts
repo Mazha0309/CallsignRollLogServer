@@ -7,8 +7,9 @@ import { createMemoryRateLimiter } from '../middleware/rate-limit';
 import { computeRequestHash, readStoredResponse, requireIdempotencyKey, storeResponse } from '../collaboration/idempotency';
 import { getRealtimeHub } from '../collaboration/realtime';
 import { getSocialRealtimeHub, socialRecipients } from '../social/realtime';
+import { searchSocialUsers } from '../social/user-search';
 import { rejectUnknownKeys, requireJsonObject, requireString } from '../utils/validation';
-import { blockFriend, expireRequests, removeFriend, requestFriend, requestSession, respondFriend, respondSession, sessionAccess, socialDashboard } from '../social/service';
+import { blockFriend, expireRequests, joinFriendSession, removeFriend, requestFriend, requestSession, respondFriend, respondSession, sessionAccess, socialDashboard } from '../social/service';
 
 export function createSocialV1Router(deps: { db?: Database.Database; config?: AppConfig } = {}) {
   const router = Router();
@@ -17,6 +18,18 @@ export function createSocialV1Router(deps: { db?: Database.Database; config?: Ap
   router.use(createAccessTokenMiddleware(runtime, () => db));
   router.use((_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
   if (runtime.rateLimitEnabled) router.use(createMemoryRateLimiter({ windowMs: 60_000, max: 120, keyGenerator: req => `${(req as V1AuthRequest).auth!.userId}:${req.ip}`, message: 'Too many friend requests' }));
+  if (runtime.rateLimitEnabled) router.get('/users', createMemoryRateLimiter({
+    windowMs: 60_000,
+    max: 30,
+    keyGenerator: req => (req as V1AuthRequest).auth!.userId,
+    message: 'Too many account searches; retry later',
+  }));
+  router.get('/users', (req: V1AuthRequest, res, next) => {
+    try {
+      rejectUnknownKeys(req.query, ['query']);
+      res.json(searchSocialUsers(db, req.auth!.userId, req.query.query));
+    } catch (error) { next(error); }
+  });
   router.post('/ws-ticket', (req: V1AuthRequest, res, next) => {
     try {
       rejectUnknownKeys(requireJsonObject(req.body ?? {}), []);
@@ -52,7 +65,7 @@ export function createSocialV1Router(deps: { db?: Database.Database; config?: Ap
           return { status: 200, body: payload, replayed: false, recipients };
         }).immediate();
         const membership = (result.body as { membership?: { sessionId: string; userId: string; role: string; version: number } }).membership;
-        if (membership && !result.replayed) getRealtimeHub(db).roleChanged(membership.sessionId, membership.userId, membership.role, membership.version);
+        if (membership && !result.replayed && (result.body as { joined?: boolean }).joined !== false) getRealtimeHub(db).roleChanged(membership.sessionId, membership.userId, membership.role, membership.version);
         if ('recipients' in result && result.recipients) getSocialRealtimeHub(db).notify(result.recipients);
         res.status(result.status).json(result.body);
       } catch (error) { next(error); }
@@ -63,7 +76,8 @@ export function createSocialV1Router(deps: { db?: Database.Database; config?: Ap
   mutation('delete', '/friends/:id', [], (actor, p) => removeFriend(db, actor, p.id));
   mutation('put', '/blocks/:username', [], (actor, p) => blockFriend(db, actor, p.username, true));
   mutation('delete', '/blocks/:username', [], (actor, p) => blockFriend(db, actor, p.username, false));
-  mutation('put', '/sessions/:id', ['visibility'], (actor, p, body) => sessionAccess(db, actor, p.id, requireString(body, 'visibility')));
+  mutation('put', '/sessions/:id', ['visibility', 'joinPolicy', 'defaultRole'], (actor, p, body) => sessionAccess(db, actor, p.id, requireString(body, 'visibility'), body.joinPolicy, body.defaultRole));
+  mutation('post', '/sessions/:id/join', [], (actor, p) => joinFriendSession(db, actor, p.id));
   mutation('post', '/sessions/:id/invitations', ['username', 'role'], (actor, p, body) => requestSession(db, actor, p.id, 'invitation', body.role, requireString(body, 'username', { max: 64 })));
   mutation('post', '/sessions/:id/applications', ['role'], (actor, p, body) => requestSession(db, actor, p.id, 'application', body.role));
   mutation('post', '/session-requests/:id/:action', [], (actor, p) => respondSession(db, actor, p.id, p.action));

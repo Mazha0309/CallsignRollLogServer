@@ -212,7 +212,7 @@ function restoreV10Fixture(db: Database.Database): void {
     DROP TABLE account_share_blocks;
     DROP TABLE account_share_grants;
   `);
-  db.prepare('DELETE FROM schema_migrations WHERE version IN (11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30)').run();
+  db.prepare('DELETE FROM schema_migrations WHERE version >= 11').run();
   db.exec(V10_COLLABORATION_AUDIT_SQL);
 }
 
@@ -291,7 +291,7 @@ test('migration v11 preserves v10 audit data and enforces public capability guar
 
     assert.equal(
       db.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get(),
-      30,
+      32,
     );
     assert.deepEqual(
       db.prepare(`

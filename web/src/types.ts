@@ -58,6 +58,11 @@ export interface SessionSummary {
 export type AccountSessionSource = 'collaboration' | 'personal' | 'shared';
 export type ShareJoinRole = 'editor' | 'viewer' | 'none';
 export type ShareGrantStatus = 'pending' | 'accepted' | 'rejected' | 'cancelled' | 'revoked' | 'expired';
+export interface ShareSelection { source: 'personal' | 'collaboration'; sessionId: string }
+export interface SessionShareOptions {
+  scopeMode: 'all' | 'selected'; selectedSessions: ShareSelection[];
+  canEditLogs: boolean; canDeleteLogs: boolean;
+}
 
 export interface AccountShareGrant {
   id: string;
@@ -73,9 +78,18 @@ export interface AccountShareGrant {
   respondedAt: string | null;
   revokedAt: string | null;
   expiresAt: string | null;
+  scopeMode?: 'all' | 'selected';
+  selectedSessions?: ShareSelection[];
+  canEditLogs?: boolean;
+  canDeleteLogs?: boolean;
+  grantorUsername?: string;
+  granteeUsername?: string;
 }
 
 export interface SharedSessionSummary {
+  canEditLogs?: boolean;
+  canDeleteLogs?: boolean;
+  snapshotRevision?: number | null;
   source: 'personal' | 'collaboration';
   sessionId: string;
   title: string;
@@ -109,6 +123,7 @@ export interface AccountSessionSummary {
   deletedAt: string | null;
   snapshotRevision: number | null;
   sharedSource?: 'personal' | 'collaboration';
+  grantId?: string;
 }
 
 export interface PersonalSessionDetails {
@@ -557,6 +572,7 @@ export interface ServerInfo {
   version?: string;
   protocolVersion?: number;
   registrationEnabled?: boolean;
+  features?: string[];
   capabilities?: Record<string, boolean>;
 }
 

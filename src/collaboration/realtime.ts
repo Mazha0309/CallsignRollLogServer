@@ -42,6 +42,10 @@ export class CollaborationRealtimeHub {
 
   publish(event: CollaborationEvent): void {
     if (event.type.startsWith('session.')) getSocialRealtimeHub(this.db).sessionChanged(event.sessionId);
+    else if (event.type.startsWith('log.')) {
+      const owner = this.db.prepare('SELECT owner_user_id FROM sessions WHERE id = ?').pluck().get(event.sessionId) as string | undefined;
+      if (owner) getSocialRealtimeHub(this.db).sharedCatalogChanged(owner);
+    }
     getRuntimeMetrics(this.db).recordEventCommitted(event.type);
     for (const connection of [...this.connections]) {
       if (connection.sessionId !== event.sessionId) continue;

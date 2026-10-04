@@ -78,7 +78,7 @@ test('migration 30 preserves users, sessions and legacy grants while removing ol
     DROP TABLE session_friend_access;
     DROP TABLE session_access_requests;
     DROP TABLE social_audit_events;
-    DELETE FROM schema_migrations WHERE version = 30;
+    DELETE FROM schema_migrations WHERE version >= 30;
   `);
   runMigrations(db);
   assert.deepEqual(db.prepare('SELECT * FROM users ORDER BY id').all(), usersBefore);
