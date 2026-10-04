@@ -44,11 +44,13 @@ RUN npm run build
 
 FROM node:24.18.0-bookworm-slim
 WORKDIR /app
-COPY --from=builder /build/server/dist ./dist
-COPY --from=builder /build/server/node_modules ./node_modules
-COPY --from=builder /build/server/package.json ./
-COPY --from=builder /build/web/dist ./web/dist
-COPY --from=builder /build/live/dist ./live/dist
+# Build contexts may be checked out with a restrictive umask. The runtime
+# user must own the copied files, including package.json and static assets.
+COPY --from=builder --chown=node:node /build/server/dist ./dist
+COPY --from=builder --chown=node:node /build/server/node_modules ./node_modules
+COPY --from=builder --chown=node:node /build/server/package.json ./
+COPY --from=builder --chown=node:node /build/web/dist ./web/dist
+COPY --from=builder --chown=node:node /build/live/dist ./live/dist
 RUN mkdir -p /app/data && chown node:node /app/data
 
 ENV PORT=3000
