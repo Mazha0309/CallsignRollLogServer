@@ -24,7 +24,7 @@ export default function ConnectPage() {
   };
   return <main style={{ maxWidth: 560, margin: '48px auto', padding: 16 }}>
     {modalContext}
-    <Card title="OpenLogTool">
+    <Card title="Callsign Roll Log">
       <Typography.Title level={3}>{t('connect.title')}</Typography.Title>
       <Typography.Paragraph>{t('connect.description')}</Typography.Paragraph>
       <Typography.Paragraph copyable={{ text: `${origin}/connect` }}>{origin}</Typography.Paragraph>

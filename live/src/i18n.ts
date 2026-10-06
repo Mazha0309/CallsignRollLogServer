@@ -1,5 +1,5 @@
 const zhCN = {
-  brand: 'OpenLogTool',
+  brand: 'Callsign Roll Log',
   publicLive: '公开实时记录',
   publicArchive: '公开归档记录',
   archiveDirectory: '归档目录',
@@ -81,7 +81,7 @@ export type MessageKey = keyof typeof zhCN;
 export type Locale = 'zh-CN' | 'en-US';
 
 const enUS: Record<MessageKey, string> = {
-  brand: 'OpenLogTool',
+  brand: 'Callsign Roll Log',
   publicLive: 'Public live log',
   publicArchive: 'Public archive',
   archiveDirectory: 'Archive directory',

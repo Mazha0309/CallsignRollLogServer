@@ -52,7 +52,7 @@ function PreferenceMenu() {
 
 function Brand({ collapsed = false }: { collapsed?: boolean }) {
   const { t } = useI18n();
-  return <div className="brand"><img className="brand-mark" src="/openlogtool-logo.png" alt="OpenLogTool" />{!collapsed && <div className="brand-copy"><div className="brand-title">OpenLogTool</div><div className="brand-subtitle">{t('brand.subtitle')}</div></div>}</div>;
+  return <div className="brand"><img className="brand-mark" src="/openlogtool-logo.png" alt="Callsign Roll Log" />{!collapsed && <div className="brand-copy"><div className="brand-title">Callsign Roll Log</div><div className="brand-subtitle">{t('brand.subtitle')}</div></div>}</div>;
 }
 
 export function AppShell({ admin = false }: { admin?: boolean }) {

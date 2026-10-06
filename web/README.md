@@ -1,4 +1,4 @@
-# OpenLogTool Server WebUI
+# Callsign Roll Log Server WebUI
 
 React + Ant Design portal for the authenticated member workspace (`/app`) and
 server administration console (`/admin`). The app uses an in-memory access

@@ -30,7 +30,7 @@ export function startServer(): Server {
   server.listen(runtimeConfig.port, () => {
     const address = server.address();
     const port = typeof address === 'object' && address ? address.port : runtimeConfig.port;
-    console.log(`OpenLogTool Server listening on port ${port}`);
+    console.log(`Callsign Roll Log Server listening on port ${port}`);
   });
 
   let shuttingDown = false;
@@ -50,7 +50,7 @@ if (require.main === module) {
   try {
     startServer();
   } catch (error) {
-    console.error('Failed to start OpenLogTool Server:', error);
+    console.error('Failed to start Callsign Roll Log Server:', error);
     process.exitCode = 1;
   }
 }

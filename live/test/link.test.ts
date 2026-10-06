@@ -18,7 +18,7 @@ test('consumePublicLink retains a valid LiveShare token in the URL fragment', as
         replaceState: () => { replaceStateCalls += 1; },
       },
     },
-    document: { title: 'OpenLogTool Live' },
+    document: { title: 'Callsign Roll Log Live' },
   });
 
   try {
