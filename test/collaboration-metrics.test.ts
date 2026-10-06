@@ -637,7 +637,7 @@ describe('collaboration operational metrics API', { concurrency: false }, () => 
     ]);
     assert.equal(body.schemaVersion, 3);
     assert.equal(body.serverInstanceId, serverInstanceId);
-    assert.equal(body.serverVersion, '0.13.0');
+    assert.equal(body.serverVersion, '0.14.0');
     assert.equal(typeof body.generatedAt, 'string');
     assert.ok(Number.isFinite(Date.parse(String(body.generatedAt))));
 
