@@ -3,7 +3,7 @@ set -euo pipefail
 
 # OpenLogTool Server Docker Compose 一键部署脚本
 # 用法: bash deploy-docker.sh [host_port]
-# 或: curl -fsSL https://raw.githubusercontent.com/Mazha0309/OpenLogToolServer/main/deploy-docker.sh | bash -s -- [host_port]
+# 或: curl -fsSL https://raw.githubusercontent.com/Mazha0309/CallsignRollLogServer/main/deploy-docker.sh | bash -s -- [host_port]
 # 可通过 OPENLOGTOOL_BRANCH=dev 部署其他远端分支；默认部署 main。
 
 REQUESTED_HOST_PORT="${1:-}"
@@ -46,7 +46,7 @@ if [ -e "$PROJECT_DIR" ]; then
   git pull --ff-only origin "$BRANCH"
 else
   git clone --branch "$BRANCH" --single-branch \
-    https://github.com/Mazha0309/OpenLogToolServer.git "$PROJECT_DIR"
+    https://github.com/Mazha0309/CallsignRollLogServer.git "$PROJECT_DIR"
   cd "$PROJECT_DIR"
 fi
 

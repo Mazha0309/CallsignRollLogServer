@@ -1,4 +1,4 @@
-# OpenLogTool Secure Live Share
+# Callsign Roll Log Secure Live Share
 
 The public, read-only Live Share client for collaboration protocol v1.
 

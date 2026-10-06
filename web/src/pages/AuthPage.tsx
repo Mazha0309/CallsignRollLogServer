@@ -65,8 +65,8 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
         <Segmented size="small" value={themeMode} options={[{ label: '◐', value: 'system' }, { label: '☀', value: 'light' }, { label: '☾', value: 'dark' }]} onChange={(value) => setThemeMode(value as 'system' | 'light' | 'dark')} />
       </div>
       <aside className="auth-aside">
-        <div><img className="brand-mark auth-brand-mark" src="/openlogtool-logo.png" alt="OpenLogTool" /><Typography.Title>OpenLogTool</Typography.Title><p>{t('brand.subtitle')}</p></div>
-        <small>OpenLogTool Server WebUI</small>
+        <div><img className="brand-mark auth-brand-mark" src="/openlogtool-logo.png" alt="Callsign Roll Log" /><Typography.Title>Callsign Roll Log</Typography.Title><p>{t('brand.subtitle')}</p></div>
+        <small>Callsign Roll Log Server WebUI</small>
       </aside>
       <main className="auth-panel">
         <Card className="auth-card">

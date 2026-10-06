@@ -1,6 +1,6 @@
-# OpenLogTool Server
+# Callsign Roll Log Server
 
-OpenLogTool 的可选配套服务端，提供用户认证、Session/日志持久化、管理后台，以及协作 v1 的发布、成员和实时事件协议。
+Callsign Roll Log 的可选配套服务端，提供用户认证、Session/日志持久化、管理后台，以及协作 v1 的发布、成员和实时事件协议。
 客户端的本地记录、词库、历史和导入导出不依赖服务器或账号；只在需要云同步、好友及多人协作时部署本项目。
 
 完整协作协议见 [Session 协作 v1 设计](docs/superpowers/specs/2026-07-11-collaboration-v1-design.md)。
@@ -124,7 +124,7 @@ Compose 默认只把服务发布到宿主机 `http://127.0.0.1:3000`，容器内
 
 ~~~bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/Mazha0309/OpenLogToolServer/main/deploy-docker.sh \
+  https://raw.githubusercontent.com/Mazha0309/CallsignRollLogServer/main/deploy-docker.sh \
   | bash -s -- 3000
 ~~~
 
@@ -142,7 +142,7 @@ curl --proto '=https' --tlsv1.2 -fsSL \
 
 ~~~bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/Mazha0309/OpenLogToolServer/main/deploy.sh \
+  https://raw.githubusercontent.com/Mazha0309/CallsignRollLogServer/main/deploy.sh \
   | bash -s -- 3000
 ~~~
 
@@ -190,7 +190,7 @@ TRUST_PROXY=1
 也可以在管理后台的“服务器设置 → 可信代理层数”中填写 `1`；后台保存的数据库覆盖值
 优先于 `.env`，两种方式任选其一，随后都需要重启服务。
 
-代理必须把站点根路径下的 `/live`、`/api` 和 `/ws` 都转发到 OpenLogTool Server，
+代理必须把站点根路径下的 `/live`、`/api` 和 `/ws` 都转发到 Callsign Roll Log Server，
 并为 `/ws` 启用 HTTP/1.1 WebSocket Upgrade。根路径的通用代理还必须原样保留
 `/BR5AI` 和 `/BR5AI/session/<id>` 这类公开归档别名路径；归档读取不需要
 Upgrade。可直接参考
