@@ -10,7 +10,7 @@ import { usePublicLiveshare } from './usePublicLiveshare';
 type Theme = 'system' | 'light' | 'dark';
 
 const PAGE_SIZE = 50;
-const REPOSITORY_URL = 'https://github.com/Mazha0309/OpenLogToolServer';
+const REPOSITORY_URL = 'https://github.com/Mazha0309/CallsignRollLogServer';
 
 function storedPreference<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   try {

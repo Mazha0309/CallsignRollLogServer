@@ -124,7 +124,7 @@ Compose 默认只把服务发布到宿主机 `http://127.0.0.1:3000`，容器内
 
 ~~~bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/Mazha0309/OpenLogToolServer/main/deploy-docker.sh \
+  https://raw.githubusercontent.com/Mazha0309/CallsignRollLogServer/main/deploy-docker.sh \
   | bash -s -- 3000
 ~~~
 
@@ -142,7 +142,7 @@ curl --proto '=https' --tlsv1.2 -fsSL \
 
 ~~~bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/Mazha0309/OpenLogToolServer/main/deploy.sh \
+  https://raw.githubusercontent.com/Mazha0309/CallsignRollLogServer/main/deploy.sh \
   | bash -s -- 3000
 ~~~
 

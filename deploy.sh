@@ -3,7 +3,7 @@ set -euo pipefail
 
 # OpenLogTool Server 一键部署脚本
 # 用法: bash deploy.sh [server_port]
-# 或: curl -fsSL https://raw.githubusercontent.com/Mazha0309/OpenLogToolServer/main/deploy.sh | bash -s -- [server_port]
+# 或: curl -fsSL https://raw.githubusercontent.com/Mazha0309/CallsignRollLogServer/main/deploy.sh | bash -s -- [server_port]
 # 可通过 OPENLOGTOOL_BRANCH=dev 部署其他远端分支；默认部署 main。
 
 PORT="${1:-3000}"
@@ -64,7 +64,7 @@ if [ -d "$PROJECT_DIR" ]; then
   fi
   git pull --ff-only origin "$BRANCH"
 else
-  git clone --branch "$BRANCH" --single-branch https://github.com/Mazha0309/OpenLogToolServer.git "$PROJECT_DIR"
+  git clone --branch "$BRANCH" --single-branch https://github.com/Mazha0309/CallsignRollLogServer.git "$PROJECT_DIR"
   cd "$PROJECT_DIR"
 fi
 
