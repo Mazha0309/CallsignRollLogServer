@@ -20,7 +20,7 @@ const HEADERS = [
 ] as const;
 const COLUMN_WIDTHS = [10, 8, 10, 8, 8, 22, 20, 7, 22, 7, 10] as const;
 const FOOTER_TEXTS = [
-  '此表格由 OpenLogTool 生成导出，本项目使用开源协议: GNU Affero General Public License V3',
+  '此表格由 Callsign Roll Log 生成导出，本项目使用开源协议: GNU Affero General Public License V3',
   '项目仓库地址: https://github.com/Mazha0309/OpenLogTool',
   '分享点名记录时无须携带本条说明',
 ] as const;
